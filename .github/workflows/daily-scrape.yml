@@ -1,0 +1,30 @@
+name: Daily Price Scrape
+
+on:
+  schedule:
+    # 04:00 UTC todos os dias (~05:00 Lisboa no verao, 04:00 no inverno).
+    - cron: "0 4 * * *"
+  workflow_dispatch: {} # permite correr manualmente a partir do GitHub
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Correr pipeline diario
+        run: npm run scrape
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          USE_DB: ${{ secrets.USE_DB }}
+          # Definir como 'false' nos secrets para escrita real em DB.
+          SCRAPER_DRY_RUN: ${{ secrets.SCRAPER_DRY_RUN || 'true' }}
