@@ -3,11 +3,13 @@ import { SearchBar } from "@/components/SearchBar";
 import { BiggestDrops } from "@/components/BiggestDrops";
 import { ProductCard } from "@/components/ProductCard";
 
-export default function HomePage() {
+export default async function HomePage() {
   const repo = getRepository();
-  const drops = repo.biggestDrops(8);
-  const featured = repo.search("", 6);
-  const supermarkets = repo.getSupermarkets();
+  const [drops, featured, supermarkets] = await Promise.all([
+    repo.biggestDrops(8),
+    repo.search("", 6),
+    repo.getSupermarkets(),
+  ]);
 
   return (
     <div>

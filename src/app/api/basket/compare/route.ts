@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   }
 
   const repo = getRepository();
-  const comparison = repo.compareBasket(
+  const comparison = await repo.compareBasket(
     parsed.data.items.map((i) => ({
       productGlobalId: i.productGlobalId,
       quantity: i.quantity,

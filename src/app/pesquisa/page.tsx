@@ -11,7 +11,7 @@ export default async function SearchPage({
 }) {
   const { q = "" } = await searchParams;
   const query = q.trim();
-  const results = getRepository().search(query, 50);
+  const results = await getRepository().search(query, 50);
 
   return (
     <div>

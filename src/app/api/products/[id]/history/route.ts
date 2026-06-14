@@ -21,12 +21,12 @@ export async function GET(
   const days = Number.isFinite(daysParam) ? Math.min(Math.max(daysParam, 1), 365) : 30;
 
   const repo = getRepository();
-  const product = repo.getProduct(globalId);
+  const product = await repo.getProduct(globalId);
   if (!product) {
     return NextResponse.json({ error: "produto nao encontrado" }, { status: 404 });
   }
 
-  const history = repo.getHistory(globalId, days);
+  const history = await repo.getHistory(globalId, days);
   return NextResponse.json({
     productId: globalId,
     productName: product.product.nameGlobal,

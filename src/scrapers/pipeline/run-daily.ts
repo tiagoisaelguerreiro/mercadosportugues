@@ -58,11 +58,19 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // TODO: trocar por PostgresSink quando USE_DB=true.
-  const sink: PriceSink = new DryRunSink();
-
   console.log(`MercadosPortugues — pipeline diario (${new Date().toISOString()})`);
   console.log(`Adapters: ${adapters.map((a) => a.slug).join(", ")}`);
+
+  // PostgresSink quando USE_DB=true; caso contrario dry-run (sem escrita).
+  let sink: PriceSink;
+  if (process.env.USE_DB === "true") {
+    const { PostgresSink } = await import("../core/postgres-sink");
+    sink = new PostgresSink();
+    console.log("Destino: PostgreSQL");
+  } else {
+    sink = new DryRunSink();
+    console.log("Destino: dry-run (sem base de dados)");
+  }
 
   for (const adapter of adapters) {
     try {

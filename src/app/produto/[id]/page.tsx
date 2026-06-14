@@ -1,9 +1,26 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getRepository } from "@/db/repository";
 import { formatEuro, formatPricePerUnit } from "@/lib/format";
 import { InteractivePriceHistory } from "@/components/InteractivePriceHistory";
 import { AddToBasketButton } from "@/components/AddToBasketButton";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}): Promise<Metadata> {
+  const { id } = await params;
+  const data = await getRepository().getProduct(Number(id));
+  if (!data) return { title: "Produto não encontrado — MercadosPortugues" };
+  const { product, cheapestPrice } = data;
+  const priceText = cheapestPrice != null ? ` desde ${cheapestPrice.toFixed(2)}€` : "";
+  return {
+    title: `${product.nameGlobal}${priceText} — MercadosPortugues`,
+    description: `Compara o preço de ${product.brand ? product.brand + " " : ""}${product.nameGlobal} entre supermercados em Portugal e vê o histórico de preços.`,
+  };
+}
 
 export default async function ProductPage({
   params,
@@ -13,11 +30,12 @@ export default async function ProductPage({
   const { id } = await params;
   const globalId = Number(id);
   const repo = getRepository();
-  const data = repo.getProduct(globalId);
+  const data = await repo.getProduct(globalId);
   if (!data) notFound();
 
-  const history = repo.getHistory(globalId, 30);
-  const { product, offers, category, savingsAbsolute, savingsPercent } = data;  const cheapest = offers[0] ?? null;
+  const history = await repo.getHistory(globalId, 30);
+  const { product, offers, category, savingsAbsolute, savingsPercent } = data;
+  const cheapest = offers[0] ?? null;
 
   return (
     <div>

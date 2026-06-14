@@ -16,7 +16,8 @@
     "scrape:continente": "tsx src/scrapers/pipeline/run-daily.ts --only=continente",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "db:seed": "tsx src/db/seed-db.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",

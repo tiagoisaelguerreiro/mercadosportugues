@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
+import { BasketLink } from "@/components/BasketLink";
 
 export const metadata: Metadata = {
   title: "MercadosPortugues — Comparador de preços de supermercados",
@@ -27,9 +28,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/" className="hover:text-brand-600">
                 Início
               </Link>
-              <Link href="/carrinho" className="hover:text-brand-600">
-                Carrinho
-              </Link>
+              <BasketLink />
             </nav>
           </div>
         </header>

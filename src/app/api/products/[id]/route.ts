@@ -11,7 +11,7 @@ export async function GET(
   if (!Number.isInteger(globalId)) {
     return NextResponse.json({ error: "id invalido" }, { status: 400 });
   }
-  const product = getRepository().getProduct(globalId);
+  const product = await getRepository().getProduct(globalId);
   if (!product) {
     return NextResponse.json({ error: "produto nao encontrado" }, { status: 404 });
   }

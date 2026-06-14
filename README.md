@@ -1,15 +1,16 @@
 # MercadosPortugues
 
 Plataforma web de **comparação diária de preços** dos principais supermercados em Portugal:
-Continente, Pingo Doce, Aldi, Intermarché, Lidl e Auchan.
+Continente, Pingo Doce, Aldi, Intermarché, Lidl, Auchan e Minipreço.
 
 O sistema faz scraping/fetch dos preços de madrugada, normaliza os dados e mostra qual o
 supermercado mais barato para um **produto individual** ou para um **carrinho de compras** completo.
 
 > **Estado atual:** a aplicação corre out-of-the-box com um repositório **em memória** alimentado
-> por dados seed realistas (sem necessidade de base de dados). A camada de persistência PostgreSQL
-> está totalmente desenhada (DDL + Drizzle) e pronta a ligar. O scraper do Continente funciona em
-> modo `dry-run` com fixtures, com o ponto de integração real claramente isolado.
+> por dados seed realistas (sem necessidade de base de dados). A persistência **PostgreSQL está
+> implementada** (Drizzle + materialized view + sink de scraping com matching) e ativa-se com
+> `USE_DB=true`. O scraper do Continente funciona em modo `dry-run` com fixtures, com o ponto de
+> integração real claramente isolado.
 
 ---
 
@@ -38,7 +39,7 @@ npm run dev        # http://localhost:3000  (usa dados seed em memória)
 Outros comandos:
 
 ```bash
-npm test                 # testes de parsing + matching
+npm test                 # 59 testes: parsing, matching, query-logic, repositório
 npm run typecheck        # verificação de tipos
 npm run lint             # ESLint (next)
 npm run build            # build de produção
@@ -63,18 +64,25 @@ src/
 │   ├── pesquisa/             # Resultados de pesquisa
 │   ├── produto/[id]/         # Detalhe + gráfico de evolução
 │   └── carrinho/             # Carrinho + comparação
-├── components/               # SearchBar, ProductCard, PriceChart, BiggestDrops…
+├── components/               # SearchBar, ProductCard, PriceChart, BiggestDrops, BasketLink…
 ├── db/
 │   ├── schema.ts             # Schema Drizzle (PostgreSQL)
-│   ├── repository.ts         # Camada de consulta (search/history/basket)
-│   └── seed-data.ts          # Dados seed + histórico gerado
+│   ├── client.ts             # Pool pg + instância Drizzle (singleton)
+│   ├── repository.ts         # Seletor de repositório (in-memory | postgres)
+│   ├── repository-types.ts   # Contrato Repository + helpers (downsample)
+│   ├── query-logic.ts        # Lógica de domínio partilhada (ofertas, carrinho, drops)
+│   ├── in-memory-repository.ts
+│   ├── postgres-repository.ts
+│   ├── seed-data.ts          # Dados seed + 365 dias de histórico gerado
+│   └── seed-db.ts            # Popula PostgreSQL (npm run db:seed)
 ├── lib/
 │   ├── types.ts              # Tipos de domínio partilhados
 │   ├── parsing.ts            # Quantidade/unidade, preço, €/kg | €/L
 │   ├── matching.ts           # Algoritmo de normalização (EAN + fuzzy + veto de tamanho)
 │   └── use-basket.ts         # Estado do carrinho (localStorage)
+├── instrumentation.ts        # Regista o repositório PostgreSQL no arranque (USE_DB=true)
 └── scrapers/
-    ├── core/                 # BaseAdapter, HttpClient, PriceSink
+    ├── core/                 # BaseAdapter, HttpClient, DryRunSink, PostgresSink
     ├── adapters/continente.ts
     └── pipeline/run-daily.ts # Orquestrador do cron
 db/
@@ -104,11 +112,23 @@ Destaques de design:
 ### Ligar a PostgreSQL real
 
 ```bash
-docker compose up -d db      # cria a DB e aplica db/schema.sql automaticamente
-cp .env.example .env         # define DATABASE_URL e USE_DB=true
+docker compose up -d db        # cria a DB e aplica db/schema.sql automaticamente
+cp .env.example .env           # define DATABASE_URL e USE_DB=true
+npm run db:seed                # popula a DB com os dados seed + histórico
+npm run dev                    # a app passa a ler de PostgreSQL
 ```
 
-A `repository.ts` é a única camada a reimplementar com SQL — API e frontend não mudam.
+Como funciona a comutação:
+
+- `getRepository()` devolve `InMemoryRepository` por defeito; com `USE_DB=true`, a
+  `instrumentation.ts` regista a fábrica do `PostgresRepository` no arranque (o driver `pg`
+  só é carregado neste modo).
+- Ambas as implementações cumprem o mesmo contrato `Repository` (`src/db/repository-types.ts`)
+  e partilham a lógica de domínio (`src/db/query-logic.ts`) — **a API e o frontend não mudam**.
+- O `PostgresRepository` lê os preços atuais da materialized view `latest_prices` e o histórico
+  de `price_history`; a pesquisa usa `pg_trgm`/`unaccent`.
+- O pipeline de scraping escreve via `PostgresSink` (`USE_DB=true npm run scrape`): faz upsert das
+  ofertas, corre o matching, insere o preço do dia (idempotente) e dá `REFRESH` à view.
 
 ---
 
@@ -200,8 +220,8 @@ e respeita `robots.txt`. Para uso público, valida juridicamente e obtém autori
 
 ## Próximos passos
 
-1. Ligar PostgreSQL real (implementar `repository.ts` com SQL sobre `latest_prices`).
-2. Confirmar o endpoint do Continente no DevTools e ativar o modo real.
-3. Adicionar o 2.º adapter (Pingo Doce/Auchan) — é onde o matching fuzzy ganha sentido.
-4. Fila de revisão para matches `0.80–0.92`.
+1. Confirmar o endpoint do Continente no DevTools e ativar o modo real (`SCRAPER_DRY_RUN=false`).
+2. Adicionar o 2.º adapter (Pingo Doce/Auchan) — é onde o matching fuzzy ganha sentido.
+3. Painel de revisão para matches na faixa `0.80–0.92` (`match_status='review'`).
+4. Cache de resultados de pesquisa e rate limiting na API pública.
 ```
