@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getRepository } from "@/db/repository";
 import { formatEuro, formatPricePerUnit } from "@/lib/format";
-import { PriceChart } from "@/components/PriceChart";
+import { InteractivePriceHistory } from "@/components/InteractivePriceHistory";
 import { AddToBasketButton } from "@/components/AddToBasketButton";
 
 export default async function ProductPage({
@@ -17,8 +17,7 @@ export default async function ProductPage({
   if (!data) notFound();
 
   const history = repo.getHistory(globalId, 30);
-  const { product, offers, category, savingsAbsolute, savingsPercent } = data;
-  const cheapest = offers[0] ?? null;
+  const { product, offers, category, savingsAbsolute, savingsPercent } = data;  const cheapest = offers[0] ?? null;
 
   return (
     <div>
@@ -140,12 +139,13 @@ export default async function ProductPage({
         </div>
       </div>
 
-      {/* Grafico de evolucao */}
+      {/* Grafico de evolucao interativo */}
       <section className="mt-10">
-        <h2 className="mb-4 text-xl font-extrabold">Evolução do preço (30 dias)</h2>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4">
-          <PriceChart supermarkets={history.supermarkets} points={history.points} />
-        </div>
+        <InteractivePriceHistory
+          productId={globalId}
+          initial={{ supermarkets: history.supermarkets, points: history.points }}
+          initialDays={30}
+        />
       </section>
     </div>
   );

@@ -177,7 +177,7 @@ class InMemoryRepository {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([date, prices]) => ({ date, prices }));
 
-    return { supermarkets: [...involved.values()], points };
+    return { supermarkets: [...involved.values()], points: downsample(points, 90) };
   }
 
   /** As maiores descidas de preco entre o penultimo e o ultimo registo. */
@@ -286,6 +286,25 @@ class InMemoryRepository {
 
 function round2(v: number): number {
   return Math.round((v + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Reduz uma série temporal a no máximo `maxPoints`, amostrando a intervalos
+ * regulares e preservando sempre o primeiro e o último ponto. Mantém o gráfico
+ * legível em períodos longos (ex.: 1 ano) sem perder a tendência.
+ */
+function downsample(points: HistoryPoint[], maxPoints: number): HistoryPoint[] {
+  if (points.length <= maxPoints) return points;
+  const step = (points.length - 1) / (maxPoints - 1);
+  const out: HistoryPoint[] = [];
+  for (let i = 0; i < maxPoints; i++) {
+    out.push(points[Math.round(i * step)]);
+  }
+  // Garante o último ponto exato (preço de hoje).
+  if (out[out.length - 1] !== points[points.length - 1]) {
+    out[out.length - 1] = points[points.length - 1];
+  }
+  return out;
 }
 
 // Singleton — reutilizado entre pedidos no mesmo processo.

@@ -14,6 +14,7 @@ export const supermarkets: Supermarket[] = [
   { id: 4, slug: "intermarche", name: "Intermarché", logoUrl: null, baseUrl: "https://www.intermarche.pt", colorHex: "#e2001a", isActive: true },
   { id: 5, slug: "lidl", name: "Lidl", logoUrl: null, baseUrl: "https://www.lidl.pt", colorHex: "#0050aa", isActive: true },
   { id: 6, slug: "auchan", name: "Auchan", logoUrl: null, baseUrl: "https://www.auchan.pt", colorHex: "#d2123c", isActive: true },
+  { id: 7, slug: "minipreco", name: "Minipreço", logoUrl: null, baseUrl: "https://www.minipreco.pt", colorHex: "#e30613", isActive: true },
 ];
 
 export const categories: Category[] = [
@@ -49,6 +50,7 @@ const SEED: SeedProduct[] = [
       [4, 0.94, null],
       [5, 0.86, null],
       [6, 0.93, 0.9],
+      [7, 0.88, null],
     ],
   },
   {
@@ -65,6 +67,7 @@ const SEED: SeedProduct[] = [
       [4, 1.39, null],
       [5, 1.25, null],
       [6, 1.42, null],
+      [7, 1.35, 1.22],
     ],
   },
   {
@@ -80,6 +83,7 @@ const SEED: SeedProduct[] = [
       [3, 1.85, null],
       [4, 2.05, 1.75],
       [6, 1.98, null],
+      [7, 1.92, null],
     ],
   },
   {
@@ -109,6 +113,7 @@ const SEED: SeedProduct[] = [
       [2, 2.19, 1.99],
       [3, 1.89, null],
       [6, 2.25, null],
+      [7, 2.09, 1.95],
     ],
   },
   {
@@ -139,6 +144,7 @@ const SEED: SeedProduct[] = [
       [2, 1.45, null],
       [3, 1.19, null],
       [6, 1.42, 1.29],
+      [7, 1.32, null],
     ],
   },
   {
@@ -184,6 +190,7 @@ const SEED: SeedProduct[] = [
       [3, 0.99, null],
       [5, 1.05, null],
       [6, 1.15, 0.99],
+      [7, 1.09, null],
     ],
   },
   {
@@ -213,6 +220,7 @@ const SEED: SeedProduct[] = [
       [3, 2.89, null],
       [5, 2.95, null],
       [6, 3.42, null],
+      [7, 3.29, 2.89],
     ],
   },
 ];
@@ -271,23 +279,28 @@ for (const s of SEED) {
 }
 
 /**
- * Gera 30 dias de historico de precos com variacao pseudo-aleatoria deterministica.
+ * Gera 365 dias de historico de precos com variacao pseudo-aleatoria
+ * deterministica (suporta filtros de 7d/30d/90d/1 ano).
  * O dia 0 (hoje) usa os precos exatos do seed.
  */
+export const HISTORY_DAYS = 365;
+
 export const priceHistory: PricePoint[] = (() => {
   const out: PricePoint[] = [];
   for (const today of todayPrices) {
-    for (let daysAgo = 30; daysAgo >= 0; daysAgo--) {
+    for (let daysAgo = HISTORY_DAYS; daysAgo >= 0; daysAgo--) {
       if (daysAgo === 0) {
         out.push(today);
         continue;
       }
-      const wave = Math.sin((today.productMarketId + daysAgo) * 0.7) * 0.08;
-      const drift = daysAgo * 0.003;
-      const base = today.priceRegular * (1 + wave + drift);
+      // Sazonalidade anual suave + ondulacao semanal + ligeiro drift historico.
+      const seasonal = Math.sin((daysAgo / 365) * 2 * Math.PI) * 0.06;
+      const weekly = Math.sin((today.productMarketId + daysAgo) * 0.7) * 0.05;
+      const drift = daysAgo * 0.0005;
+      const base = today.priceRegular * (1 + seasonal + weekly + drift);
       const regular = round2(Math.max(0.1, base));
       // promocoes esporadicas no passado
-      const onPromo = (today.productMarketId + daysAgo) % 11 === 0;
+      const onPromo = (today.productMarketId + daysAgo) % 13 === 0;
       const promo = onPromo ? round2(regular * 0.85) : null;
       out.push({
         productMarketId: today.productMarketId,
