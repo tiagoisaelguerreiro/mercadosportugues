@@ -4,6 +4,9 @@
   "private": true,
   "description": "Plataforma de comparacao diaria de precos dos supermercados em Portugal",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

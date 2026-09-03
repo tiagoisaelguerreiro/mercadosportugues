@@ -317,6 +317,10 @@ A revisão humana faz-se em `/admin/revisao` (aprovar sugestão, associar ID man
 O token fica em `sessionStorage` e é enviado como `Authorization: Bearer <ADMIN_TOKEN>`. Sem
 `ADMIN_TOKEN`, as rotas admin respondem `503`.
 
+> **Decisões duráveis:** aprovar/rejeitar/criar marca a oferta como `match_locked` —
+> nem o `rematch` nem os scrapes seguintes a alteram (só atualizam preço e dados
+> da loja). A fila de revisão também sobrevive ao `rematch`.
+
 > **Produção (fail-closed):** com `NODE_ENV=production` a app **recusa arrancar** se `ADMIN_TOKEN`
 > estiver ausente, for o placeholder do `.env.example` ou tiver menos de 32 caracteres
 > (validado em `src/instrumentation.ts`). O `docker compose` também falha sem `ADMIN_TOKEN`

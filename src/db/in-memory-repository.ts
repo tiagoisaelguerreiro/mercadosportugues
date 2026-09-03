@@ -25,7 +25,7 @@ import {
   scrapeRuns as seedScrapeRuns,
   supermarkets as seedSupermarkets,
 } from "@/db/seed-data";
-import { loadLiveCatalog } from "@/db/live-catalog";
+import { loadLiveCatalog, saveLiveCatalog, type LiveCatalog } from "@/db/live-catalog";
 import { normalizeText } from "@/lib/parsing";
 import { identityTokens, levenshtein } from "@/lib/matching";
 import { downsample, type HistoryResult, type Repository } from "@/db/repository-types";
@@ -59,8 +59,12 @@ export class InMemoryRepository implements Repository {
   private tokenIndex = new Map<string, Set<number>>();
   private scrapeRuns: ScrapeRun[] = [];
 
+  /** Catalogo em ficheiro que alimentou este repositorio (null em seed/testes). */
+  private fileCatalog: LiveCatalog | null = null;
+
   constructor() {
     const live = loadLiveCatalog();
+    this.fileCatalog = live;
     const globals = live?.productsGlobal?.length ? live.productsGlobal : seedGlobal;
     const markets = live?.productsGlobal?.length ? live.productsMarket : seedMarket;
     const history = live?.productsGlobal?.length ? live.priceHistory : seedHistory;
@@ -408,6 +412,7 @@ export class InMemoryRepository implements Repository {
       matchLocked: true,
     };
     this.marketById.set(productMarketId, updated);
+    this.persistCatalog();
     return updated;
   }
 
@@ -423,6 +428,7 @@ export class InMemoryRepository implements Repository {
       matchLocked: true,
     };
     this.marketById.set(productMarketId, updated);
+    this.persistCatalog();
     return updated;
   }
 
@@ -455,7 +461,21 @@ export class InMemoryRepository implements Repository {
       matchLocked: true,
     };
     this.marketById.set(productMarketId, updated);
+    this.persistCatalog();
     return updated;
+  }
+
+  /**
+   * Grava as decisoes do admin de volta no ficheiro (modo sem PostgreSQL).
+   * Sem isto, approve/reject perdiam-se ao reiniciar e o rematch nao os via.
+   * Em seed/testes (fileCatalog null) nao faz nada.
+   */
+  private persistCatalog(): void {
+    if (!this.fileCatalog) return;
+    this.fileCatalog.productsGlobal = [...this.globalById.values()];
+    this.fileCatalog.productsMarket = [...this.marketById.values()];
+    this.fileCatalog.scrapedAt = new Date().toISOString();
+    saveLiveCatalog(this.fileCatalog);
   }
 
   private composeReviewMatch(market: ProductMarket): ReviewMatch | null {
