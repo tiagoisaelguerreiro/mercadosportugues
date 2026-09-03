@@ -27,6 +27,7 @@ import {
 } from "@/db/seed-data";
 import { loadLiveCatalog } from "@/db/live-catalog";
 import { normalizeText } from "@/lib/parsing";
+import { identityTokens, levenshtein } from "@/lib/matching";
 import { downsample, type HistoryResult, type Repository } from "@/db/repository-types";
 import {
   browseInMemory,
@@ -54,6 +55,8 @@ export class InMemoryRepository implements Repository {
   private marketById = new Map<number, ProductMarket>();
   private latestByMarket = new Map<number, PricePoint>();
   private historyByMarket = new Map<number, PricePoint[]>();
+  /** Indice invertido token -> IDs de produtos (para tolerancia a typos). */
+  private tokenIndex = new Map<string, Set<number>>();
   private scrapeRuns: ScrapeRun[] = [];
 
   constructor() {
@@ -85,6 +88,14 @@ export class InMemoryRepository implements Repository {
     for (const [marketId, points] of this.historyByMarket) {
       points.sort((a, b) => a.capturedAt.localeCompare(b.capturedAt));
       this.latestByMarket.set(marketId, points[points.length - 1]);
+    }
+
+    for (const g of this.globalById.values()) {
+      for (const token of identityTokens(`${g.brand ?? ""} ${g.nameGlobal}`)) {
+        const set = this.tokenIndex.get(token) ?? new Set<number>();
+        set.add(g.id);
+        this.tokenIndex.set(token, set);
+      }
     }
   }
 
@@ -138,12 +149,39 @@ export class InMemoryRepository implements Repository {
   async search(query: string, limit = 30): Promise<ProductWithOffers[]> {
     const q = normalizeText(query);
     const scored: { item: ProductWithOffers; score: number }[] = [];
+    const seen = new Set<number>();
+    const push = (global: ProductGlobal, score: number) => {
+      if (seen.has(global.id)) return;
+      seen.add(global.id);
+      const item = this.composeProduct(global);
+      // Relevancia: token inteiro e prefixo valem mais que substring algures;
+      // produtos comparados em mais lojas sobem (e o valor da plataforma).
+      const tokens = new Set(identityTokens(`${global.brand ?? ""} ${global.nameGlobal}`));
+      let relevance = score;
+      for (const t of q.split(" ").filter((x) => x.length > 1)) {
+        if (tokens.has(t)) relevance += 1.5;
+        else if (t.length >= 3 && [...tokens].some((h) => h.startsWith(t))) relevance += 0.75;
+      }
+      relevance += Math.min(item.offers.length, 8) * 0.15;
+      scored.push({ item, score: relevance });
+    };
+
     for (const global of this.globalById.values()) {
       const haystack = normalizeText(`${global.brand ?? ""} ${global.nameGlobal}`);
       const score = q ? searchScore(haystack, q) : 0;
       if (score < 0) continue;
-      scored.push({ item: this.composeProduct(global), score });
+      push(global, score);
     }
+
+    // Poucos resultados? Tenta typos (distancia de edicao por token) e
+    // palavras coladas ("cocacola" -> "coca"+"cola").
+    if (q && scored.length < Math.min(5, limit)) {
+      for (const id of this.fuzzyTokenMatches(q, limit * 4)) {
+        const global = this.globalById.get(id);
+        if (global) push(global, 0.5);
+      }
+    }
+
     return scored
       .sort(
         (a, b) =>
@@ -152,6 +190,45 @@ export class InMemoryRepository implements Repository {
       )
       .slice(0, limit)
       .map((r) => r.item);
+  }
+
+  /**
+   * IDs de produtos cujos tokens estao a 1-2 edicoes dos tokens da query,
+   * ou formados por colagem de dois tokens conhecidos. Ordenados por nº de
+   * tokens coincidentes.
+   */
+  private fuzzyTokenMatches(query: string, cap: number): number[] {
+    const hits = new Map<number, number>();
+    const add = (id: number, weight: number) => hits.set(id, (hits.get(id) ?? 0) + weight);
+    for (const qt of query.split(" ").filter((t) => t.length >= 3)) {
+      // Primeiro palavras coladas ("cocacola" -> "coca"+"cola"): evidencia
+      // mais forte que um typo e evita falsos positivos ("cacarola").
+      if (qt.length >= 6) {
+        let split = false;
+        for (let i = 2; i <= qt.length - 2; i++) {
+          const a = this.tokenIndex.get(qt.slice(0, i));
+          const b = this.tokenIndex.get(qt.slice(i));
+          if (a && b) {
+            for (const id of a) add(id, 2);
+            for (const id of b) add(id, 2);
+            split = true;
+            break;
+          }
+        }
+        if (split) continue;
+      }
+      const maxDist = qt.length >= 7 ? 2 : 1;
+      for (const [token, ids] of this.tokenIndex) {
+        if (Math.abs(token.length - qt.length) > maxDist) continue;
+        if (levenshtein(token, qt) <= maxDist) {
+          for (const id of ids) add(id, 1);
+        }
+      }
+    }
+    return [...hits.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, cap)
+      .map(([id]) => id);
   }
 
   async browse(params: BrowseParams = {}): Promise<BrowseResult> {
@@ -328,6 +405,7 @@ export class InMemoryRepository implements Repository {
       productGlobalId: targetGlobalId,
       matchStatus: "matched",
       matchConfidence: 1,
+      matchLocked: true,
     };
     this.marketById.set(productMarketId, updated);
     return updated;
@@ -342,6 +420,7 @@ export class InMemoryRepository implements Repository {
       productGlobalId: null,
       matchStatus: "orphan",
       matchConfidence: null,
+      matchLocked: true,
     };
     this.marketById.set(productMarketId, updated);
     return updated;
@@ -373,6 +452,7 @@ export class InMemoryRepository implements Repository {
       productGlobalId: global.id,
       matchStatus: "orphan",
       matchConfidence: null,
+      matchLocked: true,
     };
     this.marketById.set(productMarketId, updated);
     return updated;

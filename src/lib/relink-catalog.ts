@@ -27,6 +27,10 @@ export function relinkCatalog(catalog: LiveCatalog): LiveCatalog {
   const n = listings.length;
   const parent = Array.from({ length: n }, (_, i) => i);
   const stores: Set<number>[] = listings.map((l) => new Set([l.supermarketId ?? -1]));
+  /** Ofertas com decisao manual do admin: o automatico nao as mexe. */
+  const locked = new Set(
+    listings.filter((l) => l.market.matchLocked).map((l) => l.index),
+  );
 
   const find = (x: number): number => {
     while (parent[x] !== x) {
@@ -43,14 +47,29 @@ export function relinkCatalog(catalog: LiveCatalog): LiveCatalog {
     return false;
   };
 
-  const union = (i: number, j: number): void => {
+  const union = (i: number, j: number, force = false): void => {
     const a = find(i);
     const b = find(j);
     if (a === b) return;
-    if (storeOverlap(i, j)) return;
+    // Decisoes manuais nao sao desfeitas nem refeitas pelo automatico.
+    if (!force && (locked.has(i) || locked.has(j))) return;
+    if (!force && storeOverlap(i, j)) return;
     parent[a] = b;
     for (const s of stores[a]) stores[b].add(s);
   };
+
+  // Pares manuais para o mesmo global ficam juntos (mesmo com mesma loja).
+  const lockedByGlobal = new Map<number, number[]>();
+  for (const listing of listings) {
+    const gid = listing.market.productGlobalId;
+    if (!locked.has(listing.index) || gid == null) continue;
+    const list = lockedByGlobal.get(gid) ?? [];
+    list.push(listing.index);
+    lockedByGlobal.set(gid, list);
+  }
+  for (const idxs of lockedByGlobal.values()) {
+    for (let k = 1; k < idxs.length; k++) union(idxs[0], idxs[k], true);
+  }
 
   const byEan = new Map<string, number[]>();
   for (const listing of listings) {
@@ -98,17 +117,60 @@ export function relinkCatalog(catalog: LiveCatalog): LiveCatalog {
   const globals: ProductGlobal[] = [];
   const markets: ProductMarket[] = [];
 
-  for (const members of groups.values()) {
+  // Grupos com decisao manual primeiro: reservam os seus IDs para os
+  // automaticos nao os reutilizarem noutro produto.
+  const groupList = [...groups.values()];
+  groupList.sort((a, b) => {
+    const aLocked = a.some((m) => locked.has(m.index)) ? 0 : 1;
+    const bLocked = b.some((m) => locked.has(m.index)) ? 0 : 1;
+    return aLocked - bLocked;
+  });
+
+  for (const members of groupList) {
+    const lockedOnes = members.filter((m) => locked.has(m.index));
+    if (lockedOnes.length > 0) {
+      const keeper = lockedOnes.find((m) => m.market.productGlobalId != null);
+      if (!keeper || keeper.market.productGlobalId == null) {
+        // Rejeitado pelo admin: sem global, fica orfao bloqueado.
+        for (const m of members) {
+          markets.push({
+            ...m.market,
+            productGlobalId: null,
+            matchStatus: "orphan",
+            matchConfidence: null,
+            matchLocked: true,
+          });
+        }
+        continue;
+      }
+      let globalId = keeper.market.productGlobalId;
+      if (usedIds.has(globalId)) globalId = nextFreeId(usedIds, members);
+      usedIds.add(globalId);
+      // Reutiliza a entidade global anterior quando existir.
+      const prev = catalog.productsGlobal.find((g) => g.id === keeper.market.productGlobalId);
+      if (prev && prev.id === globalId) {
+        globals.push(prev);
+      } else {
+        const built = buildGlobal(members, usedIds);
+        globals.push({ ...built, id: globalId });
+      }
+      for (const m of members) {
+        markets.push({ ...m.market, productGlobalId: globalId, matchLocked: true });
+      }
+      continue;
+    }
     const global = buildGlobal(members, usedIds);
     usedIds.add(global.id);
     globals.push(global);
     for (const member of members) {
       const linked = members.length > 1;
+      // Fila de revisao sobrevive ao relink: singletons ex-review nao viram orphan.
+      const wasReview = !linked && member.market.matchStatus === "review";
       markets.push({
         ...member.market,
         productGlobalId: global.id,
-        matchStatus: linked ? "matched" : "orphan",
-        matchConfidence: linked ? 0.9 : 0,
+        matchStatus: linked ? "matched" : wasReview ? "review" : "orphan",
+        matchConfidence: linked ? 0.9 : wasReview ? (member.market.matchConfidence ?? 0.8) : 0,
       });
     }
   }

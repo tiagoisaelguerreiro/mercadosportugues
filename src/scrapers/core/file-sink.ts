@@ -55,6 +55,25 @@ export class FileCatalogSink implements PriceSink {
       const existingMarket = this.catalog.productsMarket.find(
         (m) => m.supermarketId === supermarketId && m.marketSku === raw.marketSku,
       );
+      // EAN efetivo: grelha primeiro, guardado (enriquecido) depois. Nunca faz
+      // null-overwrite de um EAN descoberto pelo enrich:eans.
+      const effectiveEan = raw.ean ?? existingMarket?.rawEan ?? null;
+
+      // Decisao manual do admin: mantem global e estado, atualiza so dados da loja.
+      if (existingMarket?.matchLocked) {
+        existingMarket.nameMarket = raw.name;
+        existingMarket.productUrl = raw.productUrl;
+        existingMarket.imageUrl = raw.imageUrl;
+        existingMarket.rawEan = effectiveEan;
+        existingMarket.brandMarket = raw.brand;
+        existingMarket.lastSeenAt = new Date().toISOString();
+        if (existingMarket.matchStatus === "matched") byStatus.matched += 1;
+        else if (existingMarket.matchStatus === "review") byStatus.review += 1;
+        else byStatus.orphan += 1;
+        this.recordPrice(existingMarket.id, raw);
+        points += 1;
+        continue;
+      }
       const occupied = new Set(
         this.catalog.productsMarket
           .filter((m) => m.supermarketId === supermarketId && m.productGlobalId != null)
@@ -63,7 +82,7 @@ export class FileCatalogSink implements PriceSink {
       if (existingMarket?.productGlobalId != null) occupied.delete(existingMarket.productGlobalId);
 
       const outcome = matchProduct(
-        { name: raw.name, ean: raw.ean, brand: raw.brand, productUrl: raw.productUrl },
+        { name: raw.name, ean: effectiveEan, brand: raw.brand, productUrl: raw.productUrl },
         this.candidates.filter((c) => !occupied.has(c.id)),
         (ean) => {
           const hit = this.candidatesByEan.get(ean);
@@ -89,7 +108,7 @@ export class FileCatalogSink implements PriceSink {
           nameMarket: raw.name,
           productUrl: raw.productUrl,
           imageUrl: raw.imageUrl,
-          rawEan: raw.ean,
+          rawEan: effectiveEan,
           brandMarket: raw.brand,
           matchStatus: outcome.status,
           matchConfidence: outcome.confidence,
@@ -102,27 +121,14 @@ export class FileCatalogSink implements PriceSink {
         market.nameMarket = raw.name;
         market.productUrl = raw.productUrl;
         market.imageUrl = raw.imageUrl;
-        market.rawEan = raw.ean;
+        market.rawEan = effectiveEan;
         market.brandMarket = raw.brand;
         market.matchStatus = outcome.status;
         market.matchConfidence = outcome.confidence;
         market.lastSeenAt = new Date().toISOString();
       }
 
-      const existingPoint = this.catalog.priceHistory.find(
-        (p) => p.productMarketId === market.id && p.capturedAt === this.today,
-      );
-      const point = {
-        productMarketId: market.id,
-        priceRegular: raw.priceRegular,
-        pricePromo: raw.pricePromo,
-        hasPromo: raw.hasPromo,
-        pricePerUnit: raw.pricePerUnit,
-        pricePerUnitUom: raw.pricePerUnitUom,
-        capturedAt: this.today,
-      };
-      if (existingPoint) Object.assign(existingPoint, point);
-      else this.catalog.priceHistory.push(point);
+      this.recordPrice(market.id, raw);
       points += 1;
     }
 
@@ -149,6 +155,23 @@ export class FileCatalogSink implements PriceSink {
       `\n[ficheiro] ${this.catalog.productsGlobal.length} produtos, ${this.catalog.productsMarket.length} ofertas, ` +
         `${this.catalog.priceHistory.length} pontos de preco -> ${process.env.LIVE_CATALOG_PATH ?? "data/snapshots/live-catalog.json"}`,
     );
+  }
+
+  private recordPrice(marketId: number, raw: RawProduct): void {
+    const existingPoint = this.catalog.priceHistory.find(
+      (p) => p.productMarketId === marketId && p.capturedAt === this.today,
+    );
+    const point = {
+      productMarketId: marketId,
+      priceRegular: raw.priceRegular,
+      pricePromo: raw.pricePromo,
+      hasPromo: raw.hasPromo,
+      pricePerUnit: raw.pricePerUnit,
+      pricePerUnitUom: raw.pricePerUnitUom,
+      capturedAt: this.today,
+    };
+    if (existingPoint) Object.assign(existingPoint, point);
+    else this.catalog.priceHistory.push(point);
   }
 
   private createGlobal(raw: RawProduct): number {

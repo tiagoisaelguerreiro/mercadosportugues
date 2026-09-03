@@ -56,6 +56,8 @@ export interface ProductMarket {
   brandMarket?: string | null;
   matchStatus: MatchStatus;
   matchConfidence: number | null;
+  /** Decisao manual do admin (approve/reject): o relink nao altera esta oferta. */
+  matchLocked?: boolean;
   lastSeenAt: string | null;
 }
 

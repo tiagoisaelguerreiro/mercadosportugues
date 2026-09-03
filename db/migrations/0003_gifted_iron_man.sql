@@ -1,0 +1,1 @@
+ALTER TABLE "products_market" ADD COLUMN "match_locked" boolean DEFAULT false NOT NULL;

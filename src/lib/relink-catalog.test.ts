@@ -5,7 +5,7 @@ import type { ProductGlobal, ProductMarket } from "@/lib/types";
 
 function market(partial: Partial<ProductMarket> & Pick<ProductMarket, "id" | "supermarketId" | "nameMarket">): ProductMarket {
   return {
-    productGlobalId: partial.productGlobalId ?? partial.id,
+    productGlobalId: "productGlobalId" in partial ? partial.productGlobalId ?? null : partial.id,
     marketSku: `sku-${partial.id}`,
     productUrl: partial.productUrl ?? null,
     imageUrl: null,
@@ -149,5 +149,72 @@ describe("relinkCatalog (clustering)", () => {
       ]),
     );
     expect(linked.productsGlobal).toHaveLength(1);
+  });
+});
+
+describe("relinkCatalog (decisoes manuais)", () => {
+  it("mantem par aprovado junto mesmo que o fuzzy os separasse", () => {
+    const linked = relinkCatalog(
+      catalog([
+        market({
+          id: 1,
+          supermarketId: 1,
+          productGlobalId: 99,
+          nameMarket: "Leite UHT Meio Gordo Mimosa 1L",
+          brandMarket: "Mimosa",
+          matchStatus: "matched",
+          matchConfidence: 1,
+          matchLocked: true,
+        }),
+        market({
+          id: 2,
+          supermarketId: 2,
+          productGlobalId: 99,
+          nameMarket: "Iogurte Grego Natural 500g",
+          brandMarket: "Nova",
+          matchStatus: "matched",
+          matchConfidence: 1,
+          matchLocked: true,
+        }),
+      ]),
+    );
+    const byId = new Map(linked.productsMarket.map((m) => [m.id, m]));
+    // Nomes nada a ver, mas o admin decidiu: continuam no mesmo global.
+    expect(byId.get(1)!.productGlobalId).toBe(byId.get(2)!.productGlobalId);
+    expect(byId.get(1)!.matchLocked).toBe(true);
+    expect(linked.productsGlobal).toHaveLength(1);
+  });
+
+  it("rejeitado bloqueado fica orfao sem global", () => {
+    const linked = relinkCatalog(
+      catalog([
+        market({
+          id: 1,
+          supermarketId: 1,
+          productGlobalId: null,
+          nameMarket: "Leite UHT Meio Gordo Mimosa 1L",
+          matchStatus: "orphan",
+          matchLocked: true,
+        }),
+      ]),
+    );
+    expect(linked.productsMarket[0].productGlobalId).toBeNull();
+    expect(linked.productsMarket[0].matchStatus).toBe("orphan");
+  });
+
+  it("singleton ex-review mantem-se em revisao (nao vira orphan)", () => {
+    const linked = relinkCatalog(
+      catalog([
+        market({
+          id: 1,
+          supermarketId: 1,
+          nameMarket: "Produto Totalmente Unico Xyz 123",
+          matchStatus: "review",
+          matchConfidence: 0.85,
+        }),
+      ]),
+    );
+    expect(linked.productsMarket[0].matchStatus).toBe("review");
+    expect(linked.productsMarket[0].matchConfidence).toBe(0.85);
   });
 });

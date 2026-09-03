@@ -80,6 +80,7 @@ export const productsMarket = pgTable(
     rawEan: varchar("raw_ean", { length: 14 }),
     matchStatus: varchar("match_status", { length: 16 }).notNull().default("pending"),
     matchConfidence: real("match_confidence"),
+    matchLocked: boolean("match_locked").notNull().default(false),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

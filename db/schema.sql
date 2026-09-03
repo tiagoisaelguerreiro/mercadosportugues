@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS products_market (
     raw_ean             VARCHAR(14),                 -- EAN como veio do site
     match_status        VARCHAR(16) NOT NULL DEFAULT 'pending', -- pending|matched|review|orphan
     match_confidence    REAL,                        -- 0..1
+    match_locked        BOOLEAN NOT NULL DEFAULT FALSE, -- decisao manual do admin: o relink nao mexe
     last_seen_at        TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (supermarket_id, market_sku)              -- idempotencia por mercado

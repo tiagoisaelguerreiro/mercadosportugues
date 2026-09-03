@@ -27,6 +27,25 @@ describe("InMemoryRepository.search", () => {
   });
 });
 
+describe("InMemoryRepository.search (relevancia e typos)", () => {
+  it("tolera typos e palavras coladas", async () => {
+    const aroz = await repo.search("aroz");
+    expect(aroz.length).toBeGreaterThan(0);
+    expect(aroz[0].product.nameGlobal.toLowerCase()).toContain("arroz");
+
+    const colada = await repo.search("cocacola");
+    expect(colada.length).toBeGreaterThan(0);
+    expect(colada[0].product.nameGlobal.toLowerCase()).toContain("coca");
+  });
+
+  it("prefere o produto alimentar ao texto com a palavra la dentro", async () => {
+    const results = await repo.search("leite", 5);
+    expect(results.length).toBeGreaterThan(0);
+    // "Leite ..." (token inteiro + mais ofertas) antes de "After Sun em Leite ..."
+    expect(results[0].product.nameGlobal.toLowerCase().startsWith("leite")).toBe(true);
+  });
+});
+
 describe("InMemoryRepository.browse", () => {
   it("pagina o catalogo e devolve metadados", async () => {
     const page1 = await repo.browse({ page: 1, pageSize: 5, sort: "name" });
@@ -258,6 +277,7 @@ describe("InMemoryRepository.reviewMatches", () => {
 
     expect(updated?.matchStatus).toBe("matched");
     expect(updated?.matchConfidence).toBe(1);
+    expect(updated?.matchLocked).toBe(true);
     expect(await reviewRepo.listReviewMatches()).toHaveLength(0);
   });
 
@@ -269,6 +289,7 @@ describe("InMemoryRepository.reviewMatches", () => {
     expect(updated?.matchStatus).toBe("orphan");
     expect(updated?.productGlobalId).toBeNull();
     expect(updated?.matchConfidence).toBeNull();
+    expect(updated?.matchLocked).toBe(true);
   });
 
   it("cria um produto global a partir da oferta em revisao", async () => {

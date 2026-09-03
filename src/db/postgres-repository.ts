@@ -496,6 +496,7 @@ export class PostgresRepository implements Repository {
         productGlobalId: targetGlobalId,
         matchStatus: "matched",
         matchConfidence: 1,
+        matchLocked: true,
       })
       .where(eq(productsMarket.id, productMarketId))
       .returning();
@@ -509,6 +510,7 @@ export class PostgresRepository implements Repository {
         productGlobalId: null,
         matchStatus: "orphan",
         matchConfidence: null,
+        matchLocked: true,
       })
       .where(eq(productsMarket.id, productMarketId))
       .returning();
@@ -559,6 +561,7 @@ export class PostgresRepository implements Repository {
         productGlobalId: global.id,
         matchStatus: "orphan",
         matchConfidence: null,
+        matchLocked: true,
       })
       .where(eq(productsMarket.id, productMarketId))
       .returning();
@@ -696,6 +699,7 @@ function mapMarket(m: typeof productsMarket.$inferSelect): ProductMarket {
     rawEan: m.rawEan ?? null,
     matchStatus: m.matchStatus as ProductMarket["matchStatus"],
     matchConfidence: m.matchConfidence ?? null,
+    matchLocked: m.matchLocked ?? false,
     lastSeenAt: m.lastSeenAt ? m.lastSeenAt.toISOString() : null,
   };
 }
