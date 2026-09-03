@@ -1,31 +1,45 @@
 import type {
   BasketComparison,
   BasketLine,
+  BrowseParams,
+  BrowseResult,
   Category,
   HistoryPoint,
+  PlatformStats,
   PriceDrop,
   PricePoint,
   ProductGlobal,
   ProductMarket,
   ProductWithOffers,
+  ReviewGlobalInput,
+  ReviewMatch,
+  ScrapeRun,
   Supermarket,
+  SupermarketSummary,
 } from "@/lib/types";
 import {
   categories as seedCategories,
   priceHistory as seedHistory,
   productsGlobal as seedGlobal,
   productsMarket as seedMarket,
+  scrapeRuns as seedScrapeRuns,
   supermarkets as seedSupermarkets,
 } from "@/db/seed-data";
+import { loadLiveCatalog } from "@/db/live-catalog";
 import { normalizeText } from "@/lib/parsing";
 import { downsample, type HistoryResult, type Repository } from "@/db/repository-types";
 import {
+  browseInMemory,
   buildDrop,
   buildOffers,
+  buildGlobalDraftFromMarketReview,
   computeBasket,
   effectivePrice,
+  normalizeBrowseParams,
   searchScore,
+  summarizeSupermarkets,
   toProductWithOffers,
+  type CurrentPriceRow,
 } from "@/db/query-logic";
 
 /**
@@ -40,14 +54,30 @@ export class InMemoryRepository implements Repository {
   private marketById = new Map<number, ProductMarket>();
   private latestByMarket = new Map<number, PricePoint>();
   private historyByMarket = new Map<number, PricePoint[]>();
+  private scrapeRuns: ScrapeRun[] = [];
 
   constructor() {
-    for (const s of seedSupermarkets) this.supermarketsById.set(s.id, s);
-    for (const c of seedCategories) this.categoriesById.set(c.id, c);
-    for (const g of seedGlobal) this.globalById.set(g.id, g);
-    for (const m of seedMarket) this.marketById.set(m.id, m);
+    const live = loadLiveCatalog();
+    const globals = live?.productsGlobal?.length ? live.productsGlobal : seedGlobal;
+    const markets = live?.productsGlobal?.length ? live.productsMarket : seedMarket;
+    const history = live?.productsGlobal?.length ? live.priceHistory : seedHistory;
+    this.scrapeRuns = live?.scrapeRuns?.length ? live.scrapeRuns : seedScrapeRuns;
 
-    for (const point of seedHistory) {
+    for (const s of seedSupermarkets) this.supermarketsById.set(s.id, s);
+    if (live?.productsMarket?.length) {
+      const seen = new Set(live.productsMarket.map((m) => m.supermarketId));
+      for (const s of this.supermarketsById.values()) {
+        if (s.isActive && !seen.has(s.id)) {
+          this.supermarketsById.set(s.id, { ...s, isActive: false });
+        }
+      }
+    }
+    for (const c of seedCategories) this.categoriesById.set(c.id, c);
+    for (const g of globals) this.globalById.set(g.id, g);
+    for (const m of markets) this.marketById.set(m.id, m);
+    if (!live?.productsGlobal?.length) this.seedReviewMarketProduct();
+
+    for (const point of history) {
       const list = this.historyByMarket.get(point.productMarketId) ?? [];
       list.push(point);
       this.historyByMarket.set(point.productMarketId, list);
@@ -64,6 +94,23 @@ export class InMemoryRepository implements Repository {
 
   private categoryFor(global: ProductGlobal): Category | null {
     return global.categoryId ? this.categoriesById.get(global.categoryId) ?? null : null;
+  }
+
+  private seedReviewMarketProduct(): void {
+    const nextId = Math.max(0, ...this.marketById.keys()) + 1;
+    this.marketById.set(nextId, {
+      id: nextId,
+      productGlobalId: 2,
+      supermarketId: 2,
+      marketSku: "review-pd-arroz-carolino-1kg",
+      nameMarket: "Arroz Carolino Pingo Doce 1 kg",
+      productUrl: "https://www.pingodoce.pt/produto/review-arroz-carolino",
+      imageUrl: null,
+      rawEan: null,
+      matchStatus: "review",
+      matchConfidence: 0.86,
+      lastSeenAt: new Date().toISOString(),
+    });
   }
 
   private composeProduct(global: ProductGlobal): ProductWithOffers {
@@ -107,6 +154,72 @@ export class InMemoryRepository implements Repository {
       .map((r) => r.item);
   }
 
+  async browse(params: BrowseParams = {}): Promise<BrowseResult> {
+    const p = normalizeBrowseParams(params);
+    const q = normalizeText(p.query);
+    const scores = new Map<number, number>();
+    const candidates: ProductWithOffers[] = [];
+
+    for (const global of this.globalById.values()) {
+      if (q) {
+        const haystack = normalizeText(`${global.brand ?? ""} ${global.nameGlobal}`);
+        const score = searchScore(haystack, q);
+        if (score < 0) continue;
+        scores.set(global.id, score);
+      }
+      candidates.push(this.composeProduct(global));
+    }
+
+    return browseInMemory(candidates, p, (item) => scores.get(item.product.id) ?? 0);
+  }
+
+  async getStats(): Promise<PlatformStats> {
+    let offerCount = 0;
+    let promoCount = 0;
+    let lastCapturedAt: string | null = null;
+    const productsWithOffers = new Set<number>();
+
+    for (const m of this.marketById.values()) {
+      const supermarket = this.supermarketsById.get(m.supermarketId);
+      const latest = this.latestByMarket.get(m.id);
+      if (!supermarket?.isActive || !latest || m.productGlobalId == null) continue;
+      offerCount++;
+      if (latest.hasPromo) promoCount++;
+      productsWithOffers.add(m.productGlobalId);
+      if (!lastCapturedAt || latest.capturedAt > lastCapturedAt) lastCapturedAt = latest.capturedAt;
+    }
+
+    return {
+      productCount: productsWithOffers.size,
+      offerCount,
+      promoCount,
+      activeSupermarkets: [...this.supermarketsById.values()].filter((s) => s.isActive).length,
+      categoryCount: this.categoriesById.size,
+      lastCapturedAt,
+    };
+  }
+
+  async getSupermarketSummaries(): Promise<SupermarketSummary[]> {
+    const rows: CurrentPriceRow[] = [];
+    for (const m of this.marketById.values()) {
+      const latest = this.latestByMarket.get(m.id);
+      if (!latest || m.productGlobalId == null) continue;
+      rows.push({
+        productGlobalId: m.productGlobalId,
+        supermarketId: m.supermarketId,
+        effectivePrice: effectivePrice(latest),
+        hasPromo: latest.hasPromo,
+      });
+    }
+    return summarizeSupermarkets(rows, [...this.supermarketsById.values()]);
+  }
+
+  async listScrapeRuns(limit = 50): Promise<ScrapeRun[]> {
+    return [...this.scrapeRuns]
+      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+      .slice(0, clampLimit(limit));
+  }
+
   async getHistory(globalId: number, days = 30): Promise<HistoryResult> {
     const markets = this.marketsForGlobal(globalId);
     const involved = new Map<number, Supermarket>();
@@ -119,7 +232,7 @@ export class InMemoryRepository implements Repository {
 
     for (const m of markets) {
       const supermarket = this.supermarketsById.get(m.supermarketId);
-      if (!supermarket) continue;
+      if (!supermarket?.isActive) continue;
       const points = (this.historyByMarket.get(m.id) ?? []).filter(
         (p) => p.capturedAt >= cutoffIso,
       );
@@ -147,7 +260,7 @@ export class InMemoryRepository implements Repository {
       const previous = points[points.length - 2];
       const global = m.productGlobalId ? this.globalById.get(m.productGlobalId) : null;
       const supermarket = this.supermarketsById.get(m.supermarketId);
-      if (!global || !supermarket) continue;
+      if (!global || !supermarket?.isActive) continue;
       const drop = buildDrop(
         global,
         supermarket,
@@ -180,4 +293,93 @@ export class InMemoryRepository implements Repository {
         priceByKey.get(`${productGlobalId}:${supermarketId}`) ?? null,
     );
   }
+
+  async listReviewMatches(limit = 50): Promise<ReviewMatch[]> {
+    return [...this.marketById.values()]
+      .filter((m) => m.matchStatus === "review")
+      .sort((a, b) => (b.matchConfidence ?? 0) - (a.matchConfidence ?? 0))
+      .slice(0, clampLimit(limit))
+      .map((m) => this.composeReviewMatch(m))
+      .filter((m): m is ReviewMatch => m != null);
+  }
+
+  async approveReviewMatch(
+    productMarketId: number,
+    productGlobalId?: number,
+  ): Promise<ProductMarket | null> {
+    const market = this.marketById.get(productMarketId);
+    if (!market) return null;
+    const targetGlobalId = productGlobalId ?? market.productGlobalId;
+    if (targetGlobalId == null || !this.globalById.has(targetGlobalId)) return null;
+
+    const updated: ProductMarket = {
+      ...market,
+      productGlobalId: targetGlobalId,
+      matchStatus: "matched",
+      matchConfidence: 1,
+    };
+    this.marketById.set(productMarketId, updated);
+    return updated;
+  }
+
+  async rejectReviewMatch(productMarketId: number): Promise<ProductMarket | null> {
+    const market = this.marketById.get(productMarketId);
+    if (!market) return null;
+
+    const updated: ProductMarket = {
+      ...market,
+      productGlobalId: null,
+      matchStatus: "orphan",
+      matchConfidence: null,
+    };
+    this.marketById.set(productMarketId, updated);
+    return updated;
+  }
+
+  async createGlobalFromReview(
+    productMarketId: number,
+    input: ReviewGlobalInput = {},
+  ): Promise<ProductMarket | null> {
+    const market = this.marketById.get(productMarketId);
+    if (!market) return null;
+
+    const draft = buildGlobalDraftFromMarketReview(market, input);
+    const existingByEan = draft.eanCode
+      ? [...this.globalById.values()].find((g) => g.eanCode === draft.eanCode)
+      : null;
+    if (existingByEan) {
+      return this.approveReviewMatch(productMarketId, existingByEan.id);
+    }
+
+    const global: ProductGlobal = {
+      id: Math.max(0, ...this.globalById.keys()) + 1,
+      ...draft,
+    };
+    this.globalById.set(global.id, global);
+
+    const updated: ProductMarket = {
+      ...market,
+      productGlobalId: global.id,
+      matchStatus: "orphan",
+      matchConfidence: null,
+    };
+    this.marketById.set(productMarketId, updated);
+    return updated;
+  }
+
+  private composeReviewMatch(market: ProductMarket): ReviewMatch | null {
+    const supermarket = this.supermarketsById.get(market.supermarketId);
+    if (!supermarket) return null;
+    return {
+      productMarket: market,
+      supermarket,
+      suggestedProduct: market.productGlobalId
+        ? this.globalById.get(market.productGlobalId) ?? null
+        : null,
+    };
+  }
+}
+
+function clampLimit(limit: number): number {
+  return Number.isFinite(limit) ? Math.min(Math.max(Math.floor(limit), 1), 100) : 50;
 }
