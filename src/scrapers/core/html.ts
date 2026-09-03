@@ -1,5 +1,5 @@
 import type { BaseUnit } from "@/lib/types";
-import { parseQuantity } from "@/lib/parsing";
+import { parsePrice, parseQuantity } from "@/lib/parsing";
 
 /**
  * Utilitarios leves de extracao de HTML para os adapters (sem dependencias).
@@ -77,6 +77,64 @@ export function extractClassBody(html: string, className: string): string | null
 export function extractOpeningTag(html: string, className: string): string | null {
   const re = new RegExp(`<[^>]*class=(["'])[^"']*${escapeRegex(className)}[^"']*\\1[^>]*>`, "i");
   return html.match(re)?.[0] ?? null;
+}
+
+/**
+ * Le um preco de microdata SFCC (Continente, Pingo Doce, Auchan).
+ *
+ * Formas reais encontradas:
+ *   - `<span class="strike-through value" content="1.64">` (content na propria tag)
+ *   - `<span class="sales ...">...<span class="value" content="0.59">` (content em span aninhado)
+ *
+ * Procura o atributo `content` (maquina, ex.: "1.79") em vez do texto visivel
+ * ("1,79 €"), evitando o problema de spans aninhados (`.sr-only`) que partem a
+ * extracao por texto. Devolve `null` se nao encontrar.
+ */
+export function extractMicrodataPrice(html: string, markerClass: string): number | null {
+  const wanted = markerClass.toLowerCase();
+  // Encontra a tag cujo atributo class contem o token exato (case-insensitive).
+  const tagRe = /<[^>]*class=(["'])([^"']*)\1[^>]*>/gi;
+  let tagMatch: RegExpExecArray | null;
+  let markerIndex = -1;
+  while ((tagMatch = tagRe.exec(html)) !== null) {
+    const tokens = tagMatch[2].split(/\s+/).map((t) => t.toLowerCase());
+    if (tokens.includes(wanted)) {
+      markerIndex = tagMatch.index;
+      break;
+    }
+  }
+  if (markerIndex < 0) return null;
+
+  // Janela a partir do marcador: apanha content na propria tag ou em span aninhado.
+  const window = html.slice(markerIndex, markerIndex + 2000);
+  const withClassFirst =
+    /<[^>]*class=(["'])[^"']*\bvalue\b[^"']*\1[^>]*content=(["'])([^"']+)\2/i.exec(window);
+  const withContentFirst =
+    /<[^>]*content=(["'])([^"']+)\1[^>]*class=(["'])[^"']*\bvalue\b[^"']*\3/i.exec(window);
+  const raw = withClassFirst?.[3] ?? withContentFirst?.[2] ?? null;
+  return parsePrice(raw);
+}
+
+/**
+ * Interpreta rotulos de preco por unidade do tipo "1 Kg | 0,59 €/Kg"
+ * (Pingo Doce `.product-unit`, Auchan `.auc-measures--price-per-unit`).
+ * Exige a parte com "/" (preco por unidade real); um rotulo so com quantidade
+ * (ex.: "1 Kg") devolve `null` para o fallback calcular a partir do nome.
+ */
+export function parseUnitPriceLabel(
+  text: string | null | undefined,
+): { value: number; uom: BaseUnit } | null {
+  if (!text) return null;
+  const parts = text
+    .split("|")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const perPart = parts.find((p) => p.includes("/"));
+  if (!perPart) return null;
+  const value = parsePrice(perPart);
+  const uom = normalizeUom(perPart);
+  if (value == null || uom == null) return null;
+  return { value, uom };
 }
 
 export function parseJsonAttribute<T>(value: string | null): T | null {

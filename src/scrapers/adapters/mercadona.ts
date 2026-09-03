@@ -1,14 +1,27 @@
 import { resolveListingBrand } from "@/lib/matching";
 import { computePricePerUnit, parsePrice, parseQuantity } from "@/lib/parsing";
-import type { RawProduct } from "@/lib/types";
+import type { BaseUnit, RawProduct } from "@/lib/types";
 import { BaseAdapter } from "../core/base-adapter";
 import { HttpClient } from "../core/http-client";
 import { limitCategories } from "../core/sitemap";
 
 /**
  * Catalogo Mercadona via API publica da loja online (tienda.mercadona.es).
- * Os precos sao os da loja online; em Portugal a cadeia partilha o mesmo
- * catalogo Hacendado. Sem EAN na listagem — o matching faz-se por nome.
+ *
+ * ENDPOINTS (confirmados em producao, sem autenticacao)
+ * ----------
+ *   GET /api/categories/      -> arvore de categorias
+ *   GET /api/categories/{id}/ -> categoria com produtos inline
+ * (O prefixo /api/v1_1/ devolve o mesmo; usamos /api/.)
+ *
+ * Cada produto traz `price_instructions` com `unit_price` (preco total),
+ * `bulk_price` + `reference_format` (preco por unidade autoritativo, ex.: L),
+ * `previous_unit_price` e `price_decreased` (deteccao de promos).
+ *
+ * Notas:
+ *   - Sem EAN na listagem — o matching faz-se por nome + veto de tamanho.
+ *   - Nomes e precos sao os de Espanha (IVA 21%); o sortido Hacendado e
+ *     partilhado com Portugal, mas os precos PT podem diferir ligeiramente.
  */
 export class MercadonaAdapter extends BaseAdapter {
   readonly slug = "mercadona";
@@ -68,6 +81,11 @@ export class MercadonaAdapter extends BaseAdapter {
     const regular = hasPromo ? previous! : unitPrice;
     const quantity = parseQuantity(name);
     const ppu = computePricePerUnit(unitPrice, quantity);
+    // bulk_price e o preco por unidade de referencia da API; reference_format
+    // (ex.: "L") diz a unidade — autoritativo quando o nome nao a revela.
+    const refUom = mapReferenceUom(
+      item.price_instructions?.reference_format ?? item.price_instructions?.size_format,
+    );
     return {
       marketSku: String(item.id),
       name,
@@ -77,7 +95,7 @@ export class MercadonaAdapter extends BaseAdapter {
       pricePromo: hasPromo ? unitPrice : null,
       hasPromo,
       pricePerUnit: ppu?.value ?? parsePrice(item.price_instructions?.bulk_price),
-      pricePerUnitUom: ppu?.uom ?? null,
+      pricePerUnitUom: ppu?.uom ?? refUom,
       imageUrl: item.thumbnail ?? null,
       productUrl: item.share_url ?? null,
       categoryPath: item.categories?.[0]?.name ?? null,
@@ -109,6 +127,9 @@ interface MercadonaProduct {
     unit_price?: string;
     bulk_price?: string;
     previous_unit_price?: string | null;
+    reference_price?: string | null;
+    reference_format?: string | null;
+    size_format?: string | null;
   };
   categories?: { name?: string }[];
 }
@@ -146,6 +167,19 @@ function flattenProducts(node: MercadonaCategory | undefined): MercadonaProduct[
   const own = node.products ?? [];
   const nested = (node.categories ?? []).flatMap(flattenProducts);
   return [...own, ...nested];
+}
+
+/**
+ * Converte o formato de referencia da API Mercadona (ex.: "L", "l", "kg", "ud")
+ * na unidade base do dominio. O bulk_price da API ja vem nessa unidade.
+ */
+export function mapReferenceUom(format: string | null | undefined): BaseUnit | null {
+  const f = (format ?? "").trim().toLowerCase();
+  if (!f) return null;
+  if (f === "l" || f === "lt" || f === "litro" || f === "liter") return "L";
+  if (f === "kg" || f === "kilo") return "kg";
+  if (f === "ud" || f === "un" || f === "unid" || f === "unidade" || f === "dose") return "un";
+  return null;
 }
 
 function extractBrand(name: string): string | null {

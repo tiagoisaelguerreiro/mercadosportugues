@@ -234,6 +234,13 @@ isola falhas por adapter e imprime um resumo.
 | Auchan      | Sitemap `/pt/alimentacao/` + paginação pública `?start=`              | Live |
 | Mercadona   | API JSON: todas as categorias-folha de `tienda.mercadona.es`          | Live (preços da loja online ibérica) |
 
+Preços promocionais: lidos dos microdata SFCC (`.sales`/`.strike-through .value[content]`,
+ver `extractMicrodataPrice`) no Pingo Doce e Auchan, do preço riscado no Continente e de
+`previous_unit_price` na API Mercadona. Preço por unidade: rótulos `.product-unit` /
+`.auc-measures--price-per-unit`, `bulk_price`+`reference_format` (Mercadona) ou cálculo €/kg|€/L.
+Sem EAN nas grelhas — o matching é por nome + veto de tamanho (enriquecimento via JSON-LD das
+páginas de produto é o próximo passo para EANs).
+
 Sem PostgreSQL o sink é `FileCatalogSink` (`LIVE_CATALOG_PATH`). Com `USE_DB=true` grava na base.
 
 > Os `robots.txt` do Continente e do Pingo Doce bloqueiam `?start=`, `?sz=` e endpoints Demandware.

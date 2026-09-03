@@ -2,7 +2,7 @@ import type { BaseUnit, RawProduct } from "@/lib/types";
 import { computePricePerUnit, parsePrice, parseQuantity, round } from "@/lib/parsing";
 import { BaseAdapter } from "../core/base-adapter";
 import { HttpClient } from "../core/http-client";
-import { upgradeImageUrl } from "../core/html";
+import { upgradeImageUrl, extractMicrodataPrice, parseUnitPriceLabel } from "../core/html";
 import { discoverLeafCategoryPaths, limitCategories } from "../core/sitemap";
 
 const PUBLIC_CATEGORY_PATHS: Record<string, string> = {
@@ -28,22 +28,22 @@ const PRODUCT_PREFIXES = ["/home/produtos/"];
 /**
  * Adapter do Pingo Doce (plataforma Salesforce Commerce Cloud).
  *
- * ESTRATEGIA
+ * ESTRATEGIA (confirmada em producao)
  * ----------
- * O Pingo Doce deixou de depender do Mercadao para a loja online e serve o
- * catalogo em pingodoce.pt. O site atual expõe tiles de produto em HTML publico
- * de categoria, com metadados `data-gtm-info` que incluem sku, nome, marca,
- * categoria, preco e desconto.
+ * O catalogo esta em pingodoce.pt. Lemos o sitemap publico, ficamos com as
+ * categorias-folha em `/home/produtos/` e pedimos a primeira pagina HTML de
+ * cada uma, sem parametros (o robots.txt bloqueia `/on/demandware.store/`,
+ * pesquisa ajax e `?start=`/`?sz=`/`?cgid=` — respeitamos tudo).
  *
- * Nota operacional/legal: o robots.txt atual bloqueia endpoints internos
- * Demandware (`/on/demandware.store/`), pesquisa ajax e parametros de grelha
- * como `start`, `sz` e `cgid`. Em modo real lemos o sitemap publico, ficamos
- * com as categorias-folha em `/home/produtos/` e pedimos a primeira pagina
- * HTML de cada uma, sem parametros.
+ * Por tile extraimos (por ordem de fiabilidade):
+ *   - preco de venda e preco riscado dos microdata `.sales .value[content]` e
+ *     `.strike-through .value[content]` (ex.: content="1.79"); o desconto GTM
+ *     (`data-gtm-info`) vem a 0 mesmo havendo preco riscado, por isso serve
+ *     apenas de fallback;
+ *   - preco por unidade do `.product-unit` (ex.: "1 Kg | 0,59 €/Kg");
+ *   - nome, marca, categoria e imagem (`static.pingodoce.pt`) do tile/GTM.
  *
- * Como os seletores podem mudar, o adapter corre em `dry-run` por defeito com
- * fixtures deterministicas; o ponto de integracao real fica isolado em
- * `fetchPage`.
+ * Sem EAN na grelha — o matching faz-se por nome + veto de tamanho.
  */
 export class PingoDoceAdapter extends BaseAdapter {
   readonly slug = "pingo-doce";
@@ -334,14 +334,22 @@ function parseProductBlock(block: string): PingoDoceRawItem | null {
   );
   const gtmItem = gtm?.items?.[0];
   const pid = extractProductId(block) ?? gtmItem?.item_id;
-  const salePrice = gtmItem?.price ?? gtm?.value ?? parsePrice(extractPriceText(block));
+  // Precos de microdata (atributo content, ex.: "1.79") — mais fiaveis que o
+  // texto e que o desconto GTM (que vem a 0 mesmo havendo preco riscado).
+  const microSale = extractMicrodataPrice(block, "sales");
+  const microList = extractMicrodataPrice(block, "strike-through");
+  const salePrice =
+    microSale ?? gtmItem?.price ?? gtm?.value ?? parsePrice(extractPriceText(block));
   const productNameText =
     gtmItem?.item_name ?? cleanHtmlText(extractClassBody(block, "product-name-link"));
 
   if (!pid || !productNameText || salePrice == null) return null;
 
   const discount = Number(gtmItem?.discount ?? 0);
-  const listPrice = discount > 0 ? round(salePrice + discount) : salePrice;
+  const listFromDiscount = discount > 0 ? round(salePrice + discount) : null;
+  const listPrice = microList ?? listFromDiscount ?? salePrice;
+  const hasPromo = listPrice > salePrice;
+  const unitPpu = parseUnitPriceLabel(cleanHtmlText(extractClassBody(block, "product-unit")));
   const pricePerUnitText = extractUnitPriceText(block);
 
   return {
@@ -351,9 +359,9 @@ function parseProductBlock(block: string): PingoDoceRawItem | null {
       gtmItem?.item_brand ?? cleanHtmlText(extractClassBody(block, "product-brand-name")) ?? "",
     ),
     regularPrice: listPrice,
-    promoPrice: discount > 0 ? salePrice : undefined,
-    pricePerUnit: pricePerUnitText ?? undefined,
-    pricePerUnitUom: pricePerUnitText ?? undefined,
+    promoPrice: hasPromo ? salePrice : undefined,
+    pricePerUnit: unitPpu?.value ?? pricePerUnitText ?? undefined,
+    pricePerUnitUom: unitPpu?.uom ?? pricePerUnitText ?? undefined,
     imageUrl: extractImageUrl(block) ?? undefined,
     url: extractProductUrl(block) ?? undefined,
     category: decodeHtmlEntities(gtmItem?.item_category ?? ""),

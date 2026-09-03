@@ -45,6 +45,7 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: "https", hostname: "**.continente.pt" },
       { protocol: "https", hostname: "**.pingodoce.pt" },
+      { protocol: "https", hostname: "static.pingodoce.pt" },
       { protocol: "https", hostname: "**.auchan.pt" },
       { protocol: "https", hostname: "**.minipreco.pt" },
       { protocol: "https", hostname: "**.lidl.pt" },

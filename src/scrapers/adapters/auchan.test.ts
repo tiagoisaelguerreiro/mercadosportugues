@@ -148,4 +148,39 @@ describe("AuchanAdapter", () => {
     expect(starts).toEqual([undefined, 2]);
     expect(products).toHaveLength(2);
   });
+
+  it("le preco riscado real com spans .sr-only aninhados (markup www.auchan.pt)", () => {
+    const html = `
+<div class="product-tile product" data-pid="999">
+  <a class="pdp-link" href="/pt/arroz/999.html">Arroz Agulha 1kg</a>
+  <div class="auc-measures">
+    <span class="auc-measures--price-per-unit">1.25 &euro;/Kg</span>
+  </div>
+  <div class="auc-product-tile__prices">
+    <div class="price"><span>
+      <div class="auc-price__stricked">
+        <span class="list">
+          <span class="strike-through value" content="1.64">
+            <span class="sr-only">Price reduced from</span>
+            1,64 &euro;
+            <span class="sr-only">to</span>
+          </span>
+        </span>
+      </div>
+      <span class="sales">
+        <span class="value" content="1.25">
+          1,25 &euro;
+        </span>
+      </span>
+    </span></div>
+  </div>
+</div>`;
+    const items = parseAuchanGridHtml(html);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      id: "999",
+      listPrice: 1.64,
+      salePrice: 1.25,
+    });
+  });
 });

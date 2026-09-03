@@ -9,6 +9,7 @@ import {
   decodeHtmlEntities,
   extractAttribute,
   extractClassBody,
+  extractMicrodataPrice,
   extractOpeningTag,
   normalizeUom,
   parseJsonAttribute,
@@ -25,15 +26,19 @@ const MAX_PAGES_PER_CATEGORY = 50;
 /**
  * Adapter do Auchan (plataforma Salesforce Commerce Cloud / SFRA).
  *
- * ESTRATEGIA
+ * ESTRATEGIA (confirmada em producao)
  * ----------
- * A loja online auchan.pt corre em SFCC com a arquitetura de referencia SFRA.
- * O robots.txt NAO bloqueia `?start=`/`?sz=`. Em modo real lemos o sitemap de
- * categorias, ficamos com as folhas em `/pt/alimentacao/` e paginamos cada
- * grelha com `?start=` ate a pagina vir vazia, incompleta ou repetir SKUs.
+ * Lemos o sitemap de categorias, ficamos com as folhas em `/pt/alimentacao/`
+ * e paginamos cada grelha com `?start=` (permitido pelo robots.txt) ate a
+ * pagina vir vazia, incompleta ou repetir SKUs.
  *
- * O parser e tolerante a variacoes do markup SFRA. O ponto de integracao real
- * esta isolado em `fetchPage`; o modo `dry-run` (default) usa fixtures.
+ * Precos de microdata: `.sales .value[content]` (venda) e
+ * `.auc-price__stricked .strike-through.value[content]` (riscado). Atencao ao
+ * detalhe que partia a extracao por texto: spans `.sr-only` aninhados
+ * ("Price reduced from ... to") — ver `extractMicrodataPrice` em core/html.
+ * Preco por unidade autoritativo em `.auc-measures--price-per-unit`.
+ *
+ * Sem EAN na grelha — o matching faz-se por nome + veto de tamanho.
  */
 export class AuchanAdapter extends BaseAdapter {
   readonly slug = "auchan";
@@ -306,16 +311,14 @@ function parseProductBlock(block: string): AuchanRawItem | null {
 
 /**
  * Le o preco de um bloco `.<className> ... <span class="value" content="1.99">`.
- * O atributo `content` (microdata) e o mais fiavel; o texto e o fallback.
+ * Usa microdata (`content`) primeiro — robusto a spans `.sr-only` aninhados —
+ * e o texto como fallback.
  */
 function priceFromValueTag(block: string, className: string): number | null {
-  const section = extractClassBody(block, className);
-  if (!section) return null;
-  const valueTag = extractOpeningTag(section, "value");
-  const content = valueTag ? extractAttribute(valueTag, "content") : null;
-  const fromContent = parsePrice(content);
-  if (fromContent != null) return fromContent;
-  return parsePrice(cleanHtmlText(extractClassBody(section, "value") ?? section));
+  return (
+    extractMicrodataPrice(block, className) ??
+    parsePrice(cleanHtmlText(extractClassBody(block, className)))
+  );
 }
 
 /** Ancora do nome do produto dentro de `.pdp-link` (SFRA): texto + href. */

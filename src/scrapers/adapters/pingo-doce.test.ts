@@ -130,6 +130,7 @@ describe("PingoDoceAdapter (parser HTML publico)", () => {
       brand: "Nossa Fruta e Legumes",
       regularPrice: 2.29,
       promoPrice: 2.09,
+      // texto bruto do parser; a normalizacao para "kg" acontece em toRawProduct
       pricePerUnitUom: "2,09 €/Kg",
     });
   });
@@ -204,5 +205,69 @@ describe("PingoDoceAdapter (parser HTML publico)", () => {
     await expect(new PingoDoceAdapter({ dryRun: false, http }).discoverCategories()).resolves.toEqual([
       "/home/produtos/mercearia/arroz/",
     ]);
+  });
+
+  it("deteta promo pelo preco riscado mesmo com discount=0 no GTM (markup real)", () => {
+    // Estrutura real observada em www.pingodoce.pt: o GTM traz discount 0 mas o
+    // HTML tem .sales.reduced-price + .strike-through.list com content maquina.
+    const html = `
+<div class="product" data-pid="111">
+  <div class="product-tile-pd" data-pid="111" data-gtm-info='{&quot;currency&quot;:&quot;EUR&quot;,&quot;value&quot;:1.39,&quot;items&quot;:[{&quot;item_id&quot;:&quot;111&quot;,&quot;item_name&quot;:&quot;Cafe Moido&quot;,&quot;discount&quot;:0,&quot;item_brand&quot;:&quot;Delta&quot;,&quot;item_category&quot;:&quot;Cafe&quot;,&quot;price&quot;:1.39}]}'>
+  <div class="product-brand-name">Delta</div>
+  <div class="product-name-link"><a href="/p/111.html">Cafe Moido</a></div>
+  <div class="product-unit">250 g</div>
+  <div class="product-price ">
+    <span>
+      <span class="sales reduced-price">
+        <span class="value" content="1.39"></span>
+        1,39 &euro;
+      </span>
+      <span class="strike-through list">
+        <span class="value" content="1.79">
+          <span class="sr-only">Price reduced from</span>
+          1,79 &euro;
+          <span class="sr-only">to</span>
+        </span>
+      </span>
+    </span>
+  </div>
+</div>
+<div class="search-view-more-products-btn-wrapper"></div>`;
+    const products = parsePingoDoceGridHtml(html);
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({
+      id: "111",
+      regularPrice: 1.79,
+      promoPrice: 1.39,
+    });
+  });
+
+  it("le o preco por unidade do .product-unit (markup real '1 Kg | 0,59 €/Kg')", () => {
+    const html = `
+<div class="product" data-pid="650222">
+  <div class="product-tile-pd" data-pid="650222" data-gtm-info='{&quot;currency&quot;:&quot;EUR&quot;,&quot;value&quot;:0.59,&quot;items&quot;:[{&quot;item_id&quot;:&quot;650222&quot;,&quot;item_name&quot;:&quot;Farinha&quot;,&quot;discount&quot;:0,&quot;item_brand&quot;:&quot;Pingo Doce&quot;,&quot;item_category&quot;:&quot;Farinha&quot;,&quot;price&quot;:0.59}]}'>
+  <div class="product-brand-name">Pingo Doce</div>
+  <div class="product-name-link"><a href="/p/650222.html">Farinha</a></div>
+  <div class="product-unit">
+    1 Kg | 0,59 &euro;/Kg
+  </div>
+  <div class="product-price ">
+    <span>
+      <span class="sales ">
+        <span class="value" content="0.59"></span>
+        0,59 &euro;
+      </span>
+    </span>
+  </div>
+</div>
+<div class="search-view-more-products-btn-wrapper"></div>`;
+    const products = parsePingoDoceGridHtml(html);
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({
+      regularPrice: 0.59,
+      promoPrice: undefined,
+      pricePerUnit: 0.59,
+      pricePerUnitUom: "kg",
+    });
   });
 });
