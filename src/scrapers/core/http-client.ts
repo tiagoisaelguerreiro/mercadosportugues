@@ -34,7 +34,7 @@ export class HttpClient {
     this.minDelayMs = opts.minDelayMs ?? Number(process.env.SCRAPER_MIN_DELAY_MS ?? 1500);
     this.maxDelayMs = opts.maxDelayMs ?? Number(process.env.SCRAPER_MAX_DELAY_MS ?? 4000);
     this.maxRetries = opts.maxRetries ?? Number(process.env.SCRAPER_MAX_RETRIES ?? 4);
-    this.timeoutMs = opts.timeoutMs ?? 30_000;
+    this.timeoutMs = opts.timeoutMs ?? Number(process.env.SCRAPER_TIMEOUT_MS ?? 60_000);
     this.defaultHeaders = {
       "Accept-Language": "pt-PT,pt;q=0.9,en;q=0.8",
       Accept: "application/json, text/plain, */*",
@@ -56,7 +56,11 @@ export class HttpClient {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  async getJson<T = unknown>(url: string, params?: Record<string, string | number>): Promise<T> {
+  private async request<T>(
+    url: string,
+    params: Record<string, string | number> | undefined,
+    read: (res: Response) => Promise<T>,
+  ): Promise<T> {
     const target = new URL(url);
     if (params) {
       for (const [k, v] of Object.entries(params)) target.searchParams.set(k, String(v));
@@ -71,26 +75,51 @@ export class HttpClient {
           headers: { ...this.defaultHeaders, "User-Agent": this.randomUserAgent() },
           signal: controller.signal,
         });
-        if (res.status === 429 || res.status >= 500) {
-          throw new Error(`HTTP ${res.status} em ${target.pathname}`);
-        }
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status} (nao recuperavel) em ${target.pathname}`);
+          throw new HttpStatusError(res.status, `HTTP ${res.status} em ${target.pathname}`);
         }
-        const json = (await res.json()) as T;
+        const parsed = await read(res);
         await this.delay(); // boa cidadania entre pedidos bem sucedidos
-        return json;
+        return parsed;
       } catch (err) {
         lastError = err;
-        if (attempt < this.maxRetries) {
+        const retryable = err instanceof HttpStatusError ? err.retryable : true;
+        if (retryable && attempt < this.maxRetries) {
           await this.backoff(attempt);
+          continue;
         }
+        break;
       } finally {
         clearTimeout(timer);
       }
     }
+    if (lastError instanceof HttpStatusError && !lastError.retryable) {
+      throw lastError;
+    }
     throw new Error(
       `Falha apos ${this.maxRetries} tentativas: ${target.toString()} — ${String(lastError)}`,
     );
+  }
+
+  async getJson<T = unknown>(url: string, params?: Record<string, string | number>): Promise<T> {
+    return this.request(url, params, async (res) => (await res.json()) as T);
+  }
+
+  async getText(url: string, params?: Record<string, string | number>): Promise<string> {
+    return this.request(url, params, (res) => res.text());
+  }
+}
+
+export class HttpStatusError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HttpStatusError";
+  }
+
+  get retryable(): boolean {
+    return this.status === 429 || this.status >= 500;
   }
 }

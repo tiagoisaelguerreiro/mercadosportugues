@@ -2,28 +2,117 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #f6f7f9;
-  --foreground: #14181f;
+@layer base {
+  :root {
+    /* Fundo ligeiramente frio com uma pitada de verde para casar com a marca. */
+    --background: 160 20% 98%;
+    --foreground: 222 47% 9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 9%;
+    --border: 214 24% 90%;
+    --primary: 152 88% 30%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 210 24% 95%;
+    --muted-foreground: 215 16% 44%;
+    --ring: 152 88% 36%;
+    --radius: 1rem;
+
+    /*
+     * Pilha de fontes de sistema: sem download em build (funciona offline) e
+     * com renderizacao nativa em cada plataforma. Para usar Inter via
+     * next/font basta definir estas variaveis no <html>.
+     */
+    --font-sans:
+      "Inter", "Inter Variable", "SF Pro Text", -apple-system, BlinkMacSystemFont,
+      "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-display:
+      "Inter", "Inter Variable", "SF Pro Display", -apple-system, BlinkMacSystemFont,
+      "Segoe UI Variable Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  .dark {
+    /* Cartoes distintos do fundo para manter profundidade em dark mode. */
+    --background: 224 40% 6%;
+    --foreground: 210 30% 96%;
+    --card: 224 34% 10%;
+    --card-foreground: 210 30% 96%;
+    --border: 220 22% 18%;
+    --primary: 152 70% 45%;
+    --primary-foreground: 224 40% 6%;
+    --muted: 222 26% 15%;
+    --muted-foreground: 215 18% 66%;
+    --ring: 152 70% 50%;
+  }
 }
 
-* {
-  box-sizing: border-box;
+@layer base {
+  * {
+    @apply border-border;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body {
+    padding: 0;
+    margin: 0;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "cv11", "ss01", "ss03";
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  ::selection {
+    background-color: hsl(152 88% 36% / 0.22);
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
 }
 
-html,
-body {
-  padding: 0;
-  margin: 0;
+@layer components {
+  /* Fundo com grelha suave para blocos hero. */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, hsl(var(--border) / 0.55) 1px, transparent 1px),
+      linear-gradient(to bottom, hsl(var(--border) / 0.55) 1px, transparent 1px);
+    background-size: 32px 32px;
+    mask-image: radial-gradient(ellipse at top left, black 30%, transparent 75%);
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  -webkit-font-smoothing: antialiased;
-}
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
 
-a {
-  color: inherit;
-  text-decoration: none;
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
 }

@@ -1,46 +1,76 @@
-import type { Metadata } from "next";
-import Link from "next/link";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import { BasketLink } from "@/components/BasketLink";
+import { ThemeProvider } from "@/components/ThemeProvider";
+import { SiteHeader } from "@/components/layout/SiteHeader";
+import { SiteFooter } from "@/components/layout/SiteFooter";
+import { siteUrl } from "@/lib/data";
+
+// Todas as paginas dependem de dados que mudam diariamente (e, em producao, da
+// base de dados): nunca pre-renderizar em build.
+export const dynamic = "force-dynamic";
+
+const SITE_NAME = "MercadosPortugues";
+const DESCRIPTION =
+  "Compara diariamente os preços do Continente, Pingo Doce, Auchan, Lidl, Aldi, Intermarché e Mercadona. Descobre o supermercado mais barato para cada produto e para o teu carrinho completo.";
 
 export const metadata: Metadata = {
-  title: "MercadosPortugues — Comparador de preços de supermercados",
-  description:
-    "Compara diariamente os preços do Continente, Pingo Doce, Aldi, Intermarché, Lidl e Auchan. Encontra o supermercado mais barato para cada produto e para o teu carrinho.",
-  keywords: ["supermercados", "preços", "Portugal", "comparador", "poupança"],
+  metadataBase: new URL(siteUrl()),
+  title: {
+    default: `${SITE_NAME} — Comparador diário de preços de supermercados`,
+    template: `%s · ${SITE_NAME}`,
+  },
+  description: DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: [
+    "supermercados",
+    "preços",
+    "comparador de preços",
+    "Portugal",
+    "poupança",
+    "Continente",
+    "Pingo Doce",
+    "Auchan",
+    "Lidl",
+    "Mercadona",
+    "cabaz",
+  ],
+  openGraph: {
+    type: "website",
+    locale: "pt_PT",
+    siteName: SITE_NAME,
+    title: `${SITE_NAME} — Comparador diário de preços de supermercados`,
+    description: DESCRIPTION,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${SITE_NAME} — Comparador diário de preços`,
+    description: DESCRIPTION,
+  },
+  robots: { index: true, follow: true },
+  alternates: { canonical: "/" },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f6faf8" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0e17" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt-PT">
-      <body className="min-h-screen">
-        <header className="sticky top-0 z-20 border-b border-gray-200 bg-white/90 backdrop-blur">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-            <Link href="/" className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-lg font-black text-white">
-                M
-              </span>
-              <span className="text-lg font-extrabold tracking-tight">
-                Mercados<span className="text-brand-600">Portugues</span>
-              </span>
-            </Link>
-            <nav className="flex items-center gap-4 text-sm font-medium text-gray-600">
-              <Link href="/" className="hover:text-brand-600">
-                Início
-              </Link>
-              <BasketLink />
-            </nav>
-          </div>
-        </header>
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
-        <footer className="mt-16 border-t border-gray-200 bg-white">
-          <div className="mx-auto max-w-6xl px-4 py-6 text-sm text-gray-500">
-            <p>
-              MercadosPortugues — comparação diária de preços. Dados recolhidos para fins
-              informativos; preços reais podem variar por loja e disponibilidade.
-            </p>
-          </div>
-        </footer>
+    <html lang="pt-PT" suppressHydrationWarning>
+      <body className="flex min-h-screen flex-col bg-background text-foreground antialiased">
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+          <SiteHeader />
+          <main id="conteudo" className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:py-8">
+            {children}
+          </main>
+          <SiteFooter />
+        </ThemeProvider>
       </body>
     </html>
   );

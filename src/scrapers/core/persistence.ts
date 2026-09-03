@@ -1,4 +1,4 @@
-import type { RawProduct } from "@/lib/types";
+import type { RawProduct, ScrapeRunInput } from "@/lib/types";
 
 /**
  * Camada de persistencia do pipeline.
@@ -21,11 +21,15 @@ import type { RawProduct } from "@/lib/types";
  *
  *   5. REFRESH MATERIALIZED VIEW CONCURRENTLY latest_prices.
  *
+ *   6. Regista cada execucao por adapter em `scrape_runs` (observabilidade).
+ *
  * Esta interface mantem o orquestrador agnostico do destino (DB real vs
  * dry-run em ficheiro/memoria).
  */
 export interface PriceSink {
   persistBatch(supermarketId: number, products: RawProduct[]): Promise<PersistResult>;
+  /** Regista o resultado da execucao de um adapter (sucesso ou falha). */
+  recordRun(run: ScrapeRunInput): Promise<void>;
   finalize(): Promise<void>;
 }
 
@@ -33,14 +37,39 @@ export interface PersistResult {
   received: number;
   newMarketProducts: number;
   pricePoints: number;
+  /** Desagregacao do matching neste lote. */
+  matched: number;
+  review: number;
+  orphan: number;
+}
+
+export const EMPTY_PERSIST_RESULT: PersistResult = {
+  received: 0,
+  newMarketProducts: 0,
+  pricePoints: 0,
+  matched: 0,
+  review: 0,
+  orphan: 0,
+};
+
+export function addPersistResults(a: PersistResult, b: PersistResult): PersistResult {
+  return {
+    received: a.received + b.received,
+    newMarketProducts: a.newMarketProducts + b.newMarketProducts,
+    pricePoints: a.pricePoints + b.pricePoints,
+    matched: a.matched + b.matched,
+    review: a.review + b.review,
+    orphan: a.orphan + b.orphan,
+  };
 }
 
 /**
  * Sink de dry-run: nao escreve em DB, apenas agrega contagens e (opcionalmente)
- * imprime uma amostra. Usado por defeito quando SCRAPER_DRY_RUN=true.
+ * imprime uma amostra. Usado por defeito quando USE_DB != "true".
  */
 export class DryRunSink implements PriceSink {
   private readonly captured: RawProduct[] = [];
+  private readonly runs: ScrapeRunInput[] = [];
 
   async persistBatch(_supermarketId: number, products: RawProduct[]): Promise<PersistResult> {
     this.captured.push(...products);
@@ -48,7 +77,18 @@ export class DryRunSink implements PriceSink {
       received: products.length,
       newMarketProducts: products.length,
       pricePoints: products.length,
+      matched: 0,
+      review: 0,
+      orphan: products.length,
     };
+  }
+
+  async recordRun(run: ScrapeRunInput): Promise<void> {
+    this.runs.push(run);
+  }
+
+  getRuns(): ScrapeRunInput[] {
+    return this.runs;
   }
 
   async finalize(): Promise<void> {

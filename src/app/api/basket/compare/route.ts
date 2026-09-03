@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getRepository } from "@/db/repository";
+import { appendRateLimitHeaders, checkPublicRateLimit } from "@/lib/rate-limit";
 
 const BasketSchema = z.object({
   items: z
@@ -22,6 +23,9 @@ const BasketSchema = z.object({
  * entre os que tem mais itens).
  */
 export async function POST(req: NextRequest) {
+  const rateLimit = checkPublicRateLimit(req, "POST");
+  if (rateLimit.response) return rateLimit.response;
+
   let body: unknown;
   try {
     body = await req.json();
@@ -45,5 +49,6 @@ export async function POST(req: NextRequest) {
     })),
   );
 
-  return NextResponse.json(comparison);
+  const res = NextResponse.json(comparison);
+  return appendRateLimitHeaders(res, rateLimit.result);
 }

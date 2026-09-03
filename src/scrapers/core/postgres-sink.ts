@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
-import type { ProductGlobal, RawProduct } from "@/lib/types";
+import type { ProductGlobal, RawProduct, ScrapeRunInput } from "@/lib/types";
 import { getDb, getPool } from "../../db/client";
-import { productsGlobal, productsMarket, priceHistory } from "../../db/schema";
+import { productsGlobal, productsMarket, priceHistory, scrapeRuns } from "../../db/schema";
 import { parseQuantity } from "../../lib/parsing";
 import {
   DEFAULT_THRESHOLDS,
@@ -30,7 +30,15 @@ export class PostgresSink implements PriceSink {
   private candidatesByEan = new Map<string, ProductGlobal>();
   private loaded = false;
   private today = new Date().toISOString().slice(0, 10);
-  private stats = { received: 0, newMarketProducts: 0, pricePoints: 0, newGlobals: 0 };
+  private stats = {
+    received: 0,
+    newMarketProducts: 0,
+    pricePoints: 0,
+    newGlobals: 0,
+    matched: 0,
+    review: 0,
+    orphan: 0,
+  };
 
   private async ensureCandidates(): Promise<void> {
     if (this.loaded) return;
@@ -47,17 +55,19 @@ export class PostgresSink implements PriceSink {
     await this.ensureCandidates();
     let newMarket = 0;
     let points = 0;
+    const byStatus = { matched: 0, review: 0, orphan: 0 };
 
     for (const raw of products) {
       this.stats.received++;
 
       // 2) Matching -> global id
       const outcome = matchProduct(
-        { name: raw.name, ean: raw.ean },
+        { name: raw.name, ean: raw.ean, brand: raw.brand, productUrl: raw.productUrl },
         this.candidates,
         (ean) => this.candidatesByEan.get(ean),
         DEFAULT_THRESHOLDS,
       );
+      byStatus[outcome.status]++;
 
       let globalId: number;
       if (outcome.globalId != null) {
@@ -128,7 +138,32 @@ export class PostgresSink implements PriceSink {
 
     this.stats.newMarketProducts += newMarket;
     this.stats.pricePoints += points;
-    return { received: products.length, newMarketProducts: newMarket, pricePoints: points };
+    this.stats.matched += byStatus.matched;
+    this.stats.review += byStatus.review;
+    this.stats.orphan += byStatus.orphan;
+    return {
+      received: products.length,
+      newMarketProducts: newMarket,
+      pricePoints: points,
+      ...byStatus,
+    };
+  }
+
+  async recordRun(run: ScrapeRunInput): Promise<void> {
+    await this.db.insert(scrapeRuns).values({
+      supermarketId: run.supermarketId,
+      startedAt: new Date(run.startedAt),
+      finishedAt: run.finishedAt ? new Date(run.finishedAt) : null,
+      status: run.status,
+      productsReceived: run.productsReceived,
+      newMarketProducts: run.newMarketProducts,
+      pricePoints: run.pricePoints,
+      matchedCount: run.matched,
+      reviewCount: run.review,
+      orphanCount: run.orphan,
+      dryRun: run.dryRun,
+      errorMessage: run.errorMessage,
+    });
   }
 
   private async createGlobal(raw: RawProduct): Promise<number> {
@@ -181,7 +216,8 @@ export class PostgresSink implements PriceSink {
     }
     console.log(
       `\n[postgres] recebidos=${this.stats.received} novas_ofertas=${this.stats.newMarketProducts} ` +
-        `precos=${this.stats.pricePoints} novos_globais=${this.stats.newGlobals}`,
+        `precos=${this.stats.pricePoints} novos_globais=${this.stats.newGlobals} ` +
+        `matched=${this.stats.matched} review=${this.stats.review} orphan=${this.stats.orphan}`,
     );
     await getPool().end();
   }
