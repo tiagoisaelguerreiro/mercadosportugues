@@ -54,8 +54,14 @@ npm run scrape           # Continente, Pingo Doce, Auchan, Mercadona → data/sn
 npm run dev              # o site lê o ficheiro em vez dos dados demo
 ```
 
-Reinicia o `next dev` depois de cada scrape para recarregar o catálogo. Lidl, Aldi e Intermarché não
-têm catálogo online completo — ficam inativos até haver importação de folhetos.
+Reinicia o `next dev` depois de cada scrape para recarregar o catálogo.
+
+> **Lidl, Aldi e Intermarché (verificado):** sem fonte viável de preços diários.
+> O Lidl publica o sortido online sem preços (`availability: InStoreOnly` no JSON-LD);
+> o Aldi só tem folhetos semanais (sem catálogo nem API); o Intermarché online é
+> por loja aderente, com preços que variam por loja (sem preço nacional). APIs
+> pagas de terceiros (ex.: Piloterr) foram descartadas. Estas cadeias ficam
+> inativas até haver fonte — ver "Próximos passos".
 
 ### Com PostgreSQL
 
@@ -75,6 +81,10 @@ docker compose --profile scrape run --rm scraper               # correr o pipeli
 ```
 
 Para agendar no host: `0 4 * * * cd /caminho && docker compose --profile scrape run --rm scraper`.
+
+> **Publicar online?** Segue o **[DEPLOY.md](DEPLOY.md)** — checklist do zero ao site
+> no ar (VPS, HTTPS, seed, monitorização) + `scripts/provision-vps.sh` que automatiza
+> o servidor.
 
 ### Publicar em produção (VPS)
 
