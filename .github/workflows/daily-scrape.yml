@@ -1,15 +1,45 @@
 name: Daily Price Scrape
 
+# Pipeline diario de atualizacao de precos. Desenhado para NUNCA dar um
+# "sucesso" vazio: cada etapa valida a anterior e falha com mensagem clara.
+#
+# Secrets necessarios no repositorio (Settings -> Secrets and variables -> Actions):
+#   DATABASE_URL    ligacao PostgreSQL de producao
+#   USE_DB          tem de ser exatamente "true"
+#
+# Alertas de falha: o GitHub notifica por email quem ativou "Actions" em
+# Settings -> Notifications. Para alertas mais fortes (Slack/PagerDuty),
+# adiciona um step com webhook no job `notify-failure` abaixo.
+
 on:
   schedule:
     # 04:00 UTC todos os dias (~05:00 Lisboa no verao, 04:00 no inverno).
     - cron: "0 4 * * *"
-  workflow_dispatch: {} # permite correr manualmente a partir do GitHub
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Correr em dry-run (fixtures, sem escrita real)? Usar apenas para testar."
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+concurrency:
+  group: daily-scrape
+  cancel-in-progress: false # nunca interromper uma corrida a meio (deixaria dados parciais)
+
+permissions:
+  contents: read
 
 jobs:
   scrape:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      USE_DB: ${{ secrets.USE_DB }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      SCRAPER_MIN_DELAY_MS: "1500"
+      SCRAPER_MAX_DELAY_MS: "4000"
     steps:
       - uses: actions/checkout@v4
 
@@ -21,10 +51,53 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      - name: Correr pipeline diario
+      - name: 1/4 Validar configuracao (falha visivel sem secrets)
+        run: |
+          ERROS=0
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Secret DATABASE_URL em falta. Configura em Settings -> Secrets and variables -> Actions."
+            ERROS=1
+          fi
+          if [ "$USE_DB" != "true" ]; then
+            echo "::error::Secret USE_DB tem de ser exatamente \"true\" (esta vazio ou diferente). Sem isto, o scrape nao escreve em PostgreSQL."
+            ERROS=1
+          fi
+          if [ "$ERROS" = "1" ]; then
+            echo "Corrige os secrets e volta a correr manualmente (Run workflow)."
+            exit 1
+          fi
+          echo "Configuracao OK."
+
+      - name: 2/5 Migrar schema (salta se ja estiver atualizado)
+        run: |
+          if npm run db:check; then
+            echo "Schema OK — migrate desnecessario (DB provisionada via docker/schema.sql)."
+          else
+            echo "Schema desatualizado ou vazio — a aplicar db/migrations..."
+            npm run db:migrate
+            echo "A re-validar apos migrate..."
+            npm run db:check
+          fi
+
+      - name: 3/5 Validar schema da base de dados
+        run: npm run db:check
+
+      - name: 4/5 Correr pipeline diario (dados reais)
         run: npm run scrape
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          USE_DB: ${{ secrets.USE_DB }}
-          # Definir como 'false' nos secrets para escrita real em DB.
-          SCRAPER_DRY_RUN: ${{ secrets.SCRAPER_DRY_RUN || 'true' }}
+          # Forcado a false nas corridas agendadas: so aceita dry-run quando
+          # pedido explicitamente via workflow_dispatch (para testes).
+          SCRAPER_DRY_RUN: ${{ inputs.dry_run || 'false' }}
+
+      - name: 5/5 Verificar que ha dados novos de hoje
+        run: npm run scrape:verify
+
+      - name: Resumo da execucao
+        if: always()
+        run: |
+          echo "## Daily scrape — ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Consulta os logs dos passos 1-5 acima para o detalhe por adapter." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Se falhou: verifica os secrets (DATABASE_URL, USE_DB), a saude da DB" >> "$GITHUB_STEP_SUMMARY"
+          echo "(\`npm run db:check\` local) e o estado dos sites dos supermercados." >> "$GITHUB_STEP_SUMMARY"

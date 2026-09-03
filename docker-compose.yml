@@ -17,5 +17,43 @@ services:
       timeout: 5s
       retries: 5
 
+  # Aplicacao web (Next.js standalone). `docker compose up -d`
+  app:
+    build:
+      context: .
+      target: runner
+    container_name: mp_app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      USE_DB: "true"
+      DATABASE_URL: postgresql://mp_user:mp_password@db:5432/mercadosportugues
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
+      # Falha rapido e com mensagem clara se o token nao estiver definido.
+      # A app valida em arranque e RECUSA correr com o placeholder (ver instrumentation.ts).
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Define ADMIN_TOKEN com um token forte antes do deploy. Gera com: openssl rand -hex 32}
+      API_CACHE_TTL_SECONDS: ${API_CACHE_TTL_SECONDS:-60}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  # Pipeline de scraping — corre uma vez e termina. Agendar via cron do host
+  # (ex.: `0 4 * * * docker compose --profile scrape run --rm scraper`) ou GitHub Actions.
+  scraper:
+    build:
+      context: .
+      target: scraper
+    profiles: ["scrape"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      USE_DB: "true"
+      DATABASE_URL: postgresql://mp_user:mp_password@db:5432/mercadosportugues
+      SCRAPER_DRY_RUN: ${SCRAPER_DRY_RUN:-true}
+      SCRAPER_MIN_DELAY_MS: ${SCRAPER_MIN_DELAY_MS:-1500}
+      SCRAPER_MAX_DELAY_MS: ${SCRAPER_MAX_DELAY_MS:-4000}
+
 volumes:
   mp_pgdata:
