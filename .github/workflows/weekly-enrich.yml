@@ -4,10 +4,10 @@ name: Weekly EAN Enrichment
 # o catalogo. Semanal (domingo 05:00 UTC) porque e lento (~2-4s por oferta) e os
 # EANs mudam raramente — nao pertence ao scrape diario.
 #
-# Usa os mesmos secrets do daily-scrape (DATABASE_URL, USE_DB).
-# Em modo ficheiro (USE_DB diferente de "true"), o workflow faz checkout,
-# corre o enrich sobre data/snapshots/live-catalog.json e faz commit do
-# resultado de volta ao repositorio.
+# Usa os mesmos secrets do daily-scrape (DATABASE_URL, USE_DB=true).
+# Requer PostgreSQL: em modo ficheiro nao ha de onde ler o catalogo numa
+# maquina nova (o live-catalog.json nao vai para o git) — corre localmente:
+#   npm run enrich:eans -- --limit=800 && npm run rematch
 
 on:
   schedule:
@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   enrich:
@@ -44,18 +44,24 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
+      - name: Validar configuracao (requer PostgreSQL)
+        run: |
+          if [ "$USE_DB" != "true" ]; then
+            echo "::error::Secret USE_DB tem de ser exatamente \"true\". O enrich semanal corre sobre PostgreSQL (em modo ficheiro, corre localmente: npm run enrich:eans && npm run rematch)."
+            exit 1
+          fi
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::Secret DATABASE_URL em falta."
+            exit 1
+          fi
+          npm run db:check
+
       - name: Enriquecer EANs
         run: npm run enrich:eans -- --limit=${{ inputs.limit || '800' }}
 
-      - name: Religar catalogo (modo ficheiro)
-        if: ${{ secrets.USE_DB != 'true' }}
-        run: npm run rematch
-
-      - name: Commit do catalogo atualizado (modo ficheiro)
-        if: ${{ secrets.USE_DB != 'true' }}
+      - name: Resumo da execucao
+        if: always()
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/snapshots/live-catalog.json
-          git diff --cached --quiet || git commit -m "chore: EAN enrichment semanal"
-          git push
+          echo "## Weekly enrich — ${{ job.status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Os EANs novos entram no matching dos scrapes diarios seguintes (o sink nunca apaga EANs enriquecidos)." >> "$GITHUB_STEP_SUMMARY"

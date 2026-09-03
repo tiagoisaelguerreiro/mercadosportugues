@@ -22,6 +22,9 @@ services:
     build:
       context: .
       target: runner
+      # NEXT_PUBLIC_SITE_URL e embutido no JS no build: rebuild apos mudar o dominio.
+      args:
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
     container_name: mp_app
     depends_on:
       db:
@@ -32,7 +35,7 @@ services:
       NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-http://localhost:3000}
       # Falha rapido e com mensagem clara se o token nao estiver definido.
       # A app valida em arranque e RECUSA correr com o placeholder (ver instrumentation.ts).
-      ADMIN_TOKEN: ${ADMIN_TOKEN:?Define ADMIN_TOKEN com um token forte antes do deploy. Gera com: openssl rand -hex 32}
+      ADMIN_TOKEN: "${ADMIN_TOKEN:?Define ADMIN_TOKEN com um token forte antes do deploy. Gera com 'openssl rand -hex 32'}"
       API_CACHE_TTL_SECONDS: ${API_CACHE_TTL_SECONDS:-60}
     ports:
       - "3000:3000"

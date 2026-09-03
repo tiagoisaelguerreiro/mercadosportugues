@@ -51,7 +51,7 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
-      - name: 1/4 Validar configuracao (falha visivel sem secrets)
+      - name: 1/5 Validar configuracao (falha visivel sem secrets)
         run: |
           ERROS=0
           if [ -z "$DATABASE_URL" ]; then

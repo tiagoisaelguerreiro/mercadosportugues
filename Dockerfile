@@ -9,8 +9,11 @@ RUN npm ci
 # ── 2. Build da app Next.js (output standalone) ────────────────────────────
 FROM node:20-alpine AS builder
 WORKDIR /app
+# NEXT_PUBLIC_* e embutido no build: tem de vir como build-arg (ver compose).
+ARG NEXT_PUBLIC_SITE_URL=http://localhost:3000
 ENV NEXT_TELEMETRY_DISABLED=1 \
-    NEXT_OUTPUT_STANDALONE=true
+    NEXT_OUTPUT_STANDALONE=true \
+    NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

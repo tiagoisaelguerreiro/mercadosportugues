@@ -76,6 +76,27 @@ docker compose --profile scrape run --rm scraper               # correr o pipeli
 
 Para agendar no host: `0 4 * * * cd /caminho && docker compose --profile scrape run --rm scraper`.
 
+### Publicar em produção (VPS)
+
+```bash
+# 1. Aponta o DNS do teu dominio para o IP do VPS.
+# 2. No servidor, cria o .env (NAO commitar):
+NEXT_PUBLIC_SITE_URL=https://o-teu-dominio
+ADMIN_TOKEN=<64 hex gerados com: openssl rand -hex 32>
+DATABASE_URL=postgresql://mp_user:<password-forte>@db:5432/mercadosportugues
+USE_DB=true
+SCRAPER_DRY_RUN=false
+# 3. Arranca (o SITE_URL e embutido no build: rebuild se mudares o dominio):
+NEXT_PUBLIC_SITE_URL=https://o-teu-dominio ADMIN_TOKEN=... docker compose up -d --build
+# 4. Seed inicial (uma vez) e verifica:
+docker compose --profile scrape run --rm scraper npm run db:seed
+curl -sf https://o-teu-dominio/api/health
+```
+
+**HTTPS obrigatório**: o compose expõe HTTP puro na porta 3000. À frente, um reverse proxy
+com TLS automático (ex.: Caddy — `reverse_proxy 127.0.0.1:3000` obtém o certificado Let's Encrypt
+sozinho). Sem HTTPS, o token admin viaja em claro e o HSTS não protege nada.
+
 ### Monitorização (uptime + frescura dos dados)
 
 O endpoint `GET /api/health` devolve `status` (`ok` | `degraded` | `error`), `version`,
@@ -261,7 +282,8 @@ npm run rematch                                # religa os EANs novos entre loja
 Grava de forma incremental (abortar a meio não perde progresso) e salta ofertas que já
 têm EAN. Todos os EANs são validados pelo dígito de controlo antes de gravar. Em PostgreSQL,
 o sink preserva EANs enriquecidos (nunca faz null-overwrite) e usa-os no matching seguinte.
-O workflow [`weekly-enrich.yml`](.github/workflows/weekly-enrich.yml) corre isto ao domingo.
+O workflow [`weekly-enrich.yml`](.github/workflows/weekly-enrich.yml) corre isto ao domingo
+sobre PostgreSQL; em modo ficheiro corre-se localmente seguido de `npm run rematch`.
 
 Sem PostgreSQL o sink é `FileCatalogSink` (`LIVE_CATALOG_PATH`). Com `USE_DB=true` grava na base.
 
