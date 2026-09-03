@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computePricePerUnit,
+  isValidEan,
   normalizeText,
   parsePrice,
   parseQuantity,
@@ -116,5 +117,32 @@ describe("computePricePerUnit", () => {
   it("devolve null para unidades contadas", () => {
     const q = parseQuantity("Ovos 6 un");
     expect(computePricePerUnit(1.5, q)).toBeNull();
+  });
+});
+
+describe("isValidEan", () => {
+  it("aceita EANs reais encontrados nas lojas", () => {
+    expect(isValidEan("5601151260753")).toBe(true); // Auchan JSON-LD
+    expect(isValidEan("5601809013014")).toBe(true); // Continente PDP
+    expect(isValidEan("5601809011409")).toBe(true); // Continente PDP
+  });
+
+  it("aceita EAN-8 valido", () => {
+    expect(isValidEan("96385074")).toBe(true);
+  });
+
+  it("rejeita digito de controlo errado", () => {
+    expect(isValidEan("5601151260754")).toBe(false);
+  });
+
+  it("rejeita comprimentos invalidos e triviais", () => {
+    expect(isValidEan("123")).toBe(false);
+    expect(isValidEan("0000000000000")).toBe(false);
+    expect(isValidEan(null)).toBe(false);
+    expect(isValidEan("")).toBe(false);
+  });
+
+  it("ignora formatacao", () => {
+    expect(isValidEan("5601 1512 6075 3")).toBe(true);
   });
 });

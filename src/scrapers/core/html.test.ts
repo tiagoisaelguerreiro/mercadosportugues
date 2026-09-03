@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { extractMicrodataPrice, parseUnitPriceLabel } from "@/scrapers/core/html";
+import {
+  extractContinenteEans,
+  extractJsonLdProducts,
+  extractMicrodataPrice,
+  parseUnitPriceLabel,
+} from "@/scrapers/core/html";
 
 // Fragmentos reais (Pingo Doce / Auchan, SFCC) — formato que partia a extracao
 // por texto devido a spans `.sr-only` aninhados.
@@ -103,5 +108,63 @@ describe("parseUnitPriceLabel", () => {
   it("ignora rotulo so com quantidade (sem '/') para o fallback calcular", () => {
     expect(parseUnitPriceLabel("1 Kg")).toBeNull();
     expect(parseUnitPriceLabel("250 g")).toBeNull();
+  });
+});
+
+const AUCHAN_PDP = `
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Organization","name":"Auchan Portugal"}
+</script>
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"Product","name":"GRAO COMPAL DA HORTA COZIDO 410G","sku":"22809","gtin":"5601151260753","brand":{"@type":"Brand","name":"COMPAL"}}
+</script>`;
+
+const CONTINENTE_PDP = `
+<script type="application/ld+json">
+{"@context":"http://schema.org/","@type":"Product","name":"Lombos de Bacalhau","mpn":"6364533","sku":"6364533","brand":{"@type":"Thing","name":"Riberalves"},"offers":{"@type":"Offer","priceCurrency":"EUR","price":"46.49"}}
+</script>
+<div data-url="https://www.continente.pt/on/demandware.store/Sites-continente-Site/default/Product-ProductNutritionalInfoTab?pid=6364533&amp;ean=5601809013014%7c5601809011409&amp;supplierid=5600000011942"></div>`;
+
+describe("extractJsonLdProducts", () => {
+  it("extrai gtin do Auchan (EAN real)", () => {
+    const products = extractJsonLdProducts(AUCHAN_PDP);
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({
+      name: "GRAO COMPAL DA HORTA COZIDO 410G",
+      sku: "22809",
+      gtin: "5601151260753",
+      brand: "COMPAL",
+    });
+  });
+
+  it("extrai sku e preco do Continente (sem gtin)", () => {
+    const products = extractJsonLdProducts(CONTINENTE_PDP);
+    expect(products).toHaveLength(1);
+    expect(products[0]).toMatchObject({
+      sku: "6364533",
+      offerPrice: 46.49,
+      offerCurrency: "EUR",
+    });
+    expect(products[0].gtin).toBeUndefined();
+  });
+
+  it("ignora blocos invalidos e devolve vazio sem JSON-LD", () => {
+    expect(extractJsonLdProducts("<html>sem nada</html>")).toEqual([]);
+    expect(
+      extractJsonLdProducts(`<script type="application/ld+json">nao-json{{{</script>`),
+    ).toEqual([]);
+  });
+});
+
+describe("extractContinenteEans", () => {
+  it("extrai EANs do data-url nutricional (separados por %7c)", () => {
+    expect(extractContinenteEans(CONTINENTE_PDP).sort()).toEqual([
+      "5601809011409",
+      "5601809013014",
+    ]);
+  });
+
+  it("devolve vazio sem ean", () => {
+    expect(extractContinenteEans("<html></html>")).toEqual([]);
   });
 });

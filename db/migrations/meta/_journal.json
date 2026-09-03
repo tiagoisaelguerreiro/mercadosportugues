@@ -15,6 +15,13 @@
       "when": 1788447671861,
       "tag": "0001_pg_extras",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788454795634,
+      "tag": "0002_illegal_blonde_phantom",
+      "breakpoints": true
     }
   ]
 }

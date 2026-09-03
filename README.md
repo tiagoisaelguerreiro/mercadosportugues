@@ -241,6 +241,28 @@ ver `extractMicrodataPrice`) no Pingo Doce e Auchan, do preço riscado no Contin
 Sem EAN nas grelhas — o matching é por nome + veto de tamanho (enriquecimento via JSON-LD das
 páginas de produto é o próximo passo para EANs).
 
+### Enriquecimento de EANs (`npm run enrich:eans`)
+
+As grelhas e a API não trazem EANs, mas as páginas de produto sim. Fontes confirmadas:
+
+| Loja | Fonte do EAN |
+| ---- | ------------ |
+| Auchan | JSON-LD `gtin` da página de produto |
+| Continente | parâmetro `ean=` do data-url nutricional (`ean=A%7cB`) |
+| Pingo Doce, Mercadona | OpenFoodFacts com critério estrito (marca + tamanho + similaridade ≥ 0.82/0.97) |
+
+```bash
+npm run enrich:eans -- --limit=200            # prioriza produtos em 2+ lojas
+npm run enrich:eans -- --only=auchan --limit=500
+npm run enrich:eans -- --source=off --dry-run # pre-visualiza
+npm run rematch                                # religa os EANs novos entre lojas
+```
+
+Grava de forma incremental (abortar a meio não perde progresso) e salta ofertas que já
+têm EAN. Todos os EANs são validados pelo dígito de controlo antes de gravar. Em PostgreSQL,
+o sink preserva EANs enriquecidos (nunca faz null-overwrite) e usa-os no matching seguinte.
+O workflow [`weekly-enrich.yml`](.github/workflows/weekly-enrich.yml) corre isto ao domingo.
+
 Sem PostgreSQL o sink é `FileCatalogSink` (`LIVE_CATALOG_PATH`). Com `USE_DB=true` grava na base.
 
 > Os `robots.txt` do Continente e do Pingo Doce bloqueiam `?start=`, `?sz=` e endpoints Demandware.

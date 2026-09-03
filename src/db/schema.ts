@@ -74,6 +74,7 @@ export const productsMarket = pgTable(
       .references(() => supermarkets.id),
     marketSku: varchar("market_sku", { length: 64 }).notNull(),
     nameMarket: varchar("name_market", { length: 255 }).notNull(),
+    brandMarket: varchar("brand_market", { length: 120 }),
     productUrl: text("product_url"),
     imageUrl: text("image_url"),
     rawEan: varchar("raw_ean", { length: 14 }),

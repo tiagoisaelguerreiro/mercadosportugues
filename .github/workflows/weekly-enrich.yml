@@ -1,0 +1,61 @@
+name: Weekly EAN Enrichment
+
+# Enriquece EANs em falta (paginas de produto + OpenFoodFacts) e volta a ligar
+# o catalogo. Semanal (domingo 05:00 UTC) porque e lento (~2-4s por oferta) e os
+# EANs mudam raramente — nao pertence ao scrape diario.
+#
+# Usa os mesmos secrets do daily-scrape (DATABASE_URL, USE_DB).
+# Em modo ficheiro (USE_DB diferente de "true"), o workflow faz checkout,
+# corre o enrich sobre data/snapshots/live-catalog.json e faz commit do
+# resultado de volta ao repositorio.
+
+on:
+  schedule:
+    - cron: "0 5 * * 0"
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Maximo de ofertas a enriquecer"
+        required: false
+        default: "800"
+
+concurrency:
+  group: weekly-enrich
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  enrich:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      USE_DB: ${{ secrets.USE_DB }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Enriquecer EANs
+        run: npm run enrich:eans -- --limit=${{ inputs.limit || '800' }}
+
+      - name: Religar catalogo (modo ficheiro)
+        if: ${{ secrets.USE_DB != 'true' }}
+        run: npm run rematch
+
+      - name: Commit do catalogo atualizado (modo ficheiro)
+        if: ${{ secrets.USE_DB != 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/snapshots/live-catalog.json
+          git diff --cached --quiet || git commit -m "chore: EAN enrichment semanal"
+          git push

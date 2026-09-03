@@ -189,6 +189,25 @@ export function round(value: number, decimals = 2): number {
 }
 
 /**
+ * Valida um codigo de barras EAN-8/EAN-13 pelo digito de controlo.
+ * Rejeita sequencias triviais (ex.: so zeros) e comprimentos invalidos.
+ * Essencial antes de guardar EANs extraidos de HTML — evita "colar" produtos
+ * diferentes com um codigo aparentemente valido mas errado.
+ */
+export function isValidEan(code: string | null | undefined): boolean {
+  if (!code) return false;
+  const digits = code.replace(/\D/g, "");
+  if (digits.length !== 8 && digits.length !== 13) return false;
+  if (/^(\d)\1+$/.test(digits)) return false;
+  const body = digits.slice(0, -1).split("").map(Number);
+  const check = Number(digits[digits.length - 1]);
+  // EAN-13: posicoes impares x1, pares x3. EAN-8: impares x3, pares x1.
+  const weights = digits.length === 13 ? [1, 3] : [3, 1];
+  const sum = body.reduce((acc, d, i) => acc + d * weights[i % 2], 0);
+  return (10 - (sum % 10)) % 10 === check;
+}
+
+/**
  * Calcula o preco por unidade base (€/kg ou €/L) dado o preco efetivo e a quantidade.
  * Devolve `null` para produtos contados a unidade ('un') ou sem quantidade.
  */

@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS products_market (
     supermarket_id      SMALLINT NOT NULL REFERENCES supermarkets(id),
     market_sku          VARCHAR(64) NOT NULL,        -- SKU interno do site
     name_market         VARCHAR(255) NOT NULL,
+    brand_market        VARCHAR(120),                  -- marca tal como veio da loja
     product_url         TEXT,
     image_url           TEXT,
     raw_ean             VARCHAR(14),                 -- EAN como veio do site

@@ -72,7 +72,12 @@ export class HttpClient {
       const timer = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
         const res = await fetch(target, {
-          headers: { ...this.defaultHeaders, "User-Agent": this.randomUserAgent() },
+          headers: {
+            ...this.defaultHeaders,
+            // Rotacao por defeito, mas respeita um User-Agent explicito
+            // (ex.: OpenFoodFacts pede identificacao do projeto).
+            "User-Agent": this.defaultHeaders["User-Agent"] ?? this.randomUserAgent(),
+          },
           signal: controller.signal,
         });
         if (!res.ok) {

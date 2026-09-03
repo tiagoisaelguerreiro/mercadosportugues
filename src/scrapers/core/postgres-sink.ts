@@ -11,6 +11,18 @@ import {
 import type { PersistResult, PriceSink } from "./persistence";
 
 /**
+ * EAN efetivo de uma oferta: o da grelha quando existe, senao o ja guardado
+ * (ex.: via `npm run enrich:eans`). Nunca apaga um EAN enriquecido com o
+ * `null` da grelha — e e esse EAN que alimenta o matching seguinte.
+ */
+export function pickOfferEan(
+  gridEan: string | null | undefined,
+  storedEan: string | null | undefined,
+): string | null {
+  return gridEan ?? storedEan ?? null;
+}
+
+/**
  * Sink que persiste em PostgreSQL, de forma idempotente:
  *
  *   1. UPSERT em products_market por (supermarket_id, market_sku).
@@ -21,6 +33,10 @@ import type { PersistResult, PriceSink } from "./persistence";
  *      ON CONFLICT DO UPDATE (re-correr no mesmo dia atualiza, nao duplica).
  *   4. No finalize(): garante a particao do mes e REFRESH da materialized view.
  *
+ * EANs enriquecidos (`enrich:eans`) sao preservados: o matching usa
+ * `grelha ?? guardado` e o upsert nunca faz null-overwrite. Assim, um EAN
+ * descoberto hoje liga a oferta nos scrapes seguintes.
+ *
  * Carrega os candidatos globais uma vez em memoria (para projetos com dezenas de
  * milhares de produtos isto e aceitavel; acima disso, filtrar por trigram no DB).
  */
@@ -28,6 +44,8 @@ export class PostgresSink implements PriceSink {
   private db = getDb();
   private candidates: MatchCandidate[] = [];
   private candidatesByEan = new Map<string, ProductGlobal>();
+  /** EANs ja guardados por oferta ("supermarketId|marketSku") — preservacao. */
+  private eanByOffer = new Map<string, string>();
   private loaded = false;
   private today = new Date().toISOString().slice(0, 10);
   private stats = {
@@ -48,6 +66,16 @@ export class PostgresSink implements PriceSink {
       this.candidates.push(g);
       if (g.eanCode) this.candidatesByEan.set(g.eanCode, g);
     }
+    const offers = await this.db
+      .select({
+        supermarketId: productsMarket.supermarketId,
+        marketSku: productsMarket.marketSku,
+        rawEan: productsMarket.rawEan,
+      })
+      .from(productsMarket);
+    for (const o of offers) {
+      if (o.rawEan) this.eanByOffer.set(`${o.supermarketId}|${o.marketSku}`, o.rawEan);
+    }
     this.loaded = true;
   }
 
@@ -60,9 +88,13 @@ export class PostgresSink implements PriceSink {
     for (const raw of products) {
       this.stats.received++;
 
+      // EAN efetivo: grelha primeiro, guardado (enriquecido) depois.
+      const offerKey = `${supermarketId}|${raw.marketSku}`;
+      const ean = pickOfferEan(raw.ean, this.eanByOffer.get(offerKey));
+
       // 2) Matching -> global id
       const outcome = matchProduct(
-        { name: raw.name, ean: raw.ean, brand: raw.brand, productUrl: raw.productUrl },
+        { name: raw.name, ean, brand: raw.brand, productUrl: raw.productUrl },
         this.candidates,
         (ean) => this.candidatesByEan.get(ean),
         DEFAULT_THRESHOLDS,
@@ -73,10 +105,10 @@ export class PostgresSink implements PriceSink {
       if (outcome.globalId != null) {
         globalId = outcome.globalId;
       } else {
-        globalId = await this.createGlobal(raw);
+        globalId = await this.createGlobal(raw, ean);
       }
 
-      // 1) UPSERT da oferta de mercado
+      // 1) UPSERT da oferta de mercado (nunca apaga EAN enriquecido com null)
       const [marketRow] = await this.db
         .insert(productsMarket)
         .values({
@@ -86,7 +118,7 @@ export class PostgresSink implements PriceSink {
           nameMarket: raw.name,
           productUrl: raw.productUrl,
           imageUrl: raw.imageUrl,
-          rawEan: raw.ean,
+          rawEan: ean,
           matchStatus: outcome.status,
           matchConfidence: outcome.confidence,
           lastSeenAt: new Date(),
@@ -98,13 +130,14 @@ export class PostgresSink implements PriceSink {
             nameMarket: raw.name,
             productUrl: raw.productUrl,
             imageUrl: raw.imageUrl,
-            rawEan: raw.ean,
+            rawEan: ean,
             matchStatus: outcome.status,
             matchConfidence: outcome.confidence,
             lastSeenAt: new Date(),
           },
         })
         .returning({ id: productsMarket.id, createdAt: productsMarket.createdAt });
+      if (ean) this.eanByOffer.set(offerKey, ean);
 
       const isNew =
         marketRow.createdAt != null &&
@@ -166,14 +199,14 @@ export class PostgresSink implements PriceSink {
     });
   }
 
-  private async createGlobal(raw: RawProduct): Promise<number> {
+  private async createGlobal(raw: RawProduct, ean: string | null): Promise<number> {
     const q = parseQuantity(raw.name);
     const [row] = await this.db
       .insert(productsGlobal)
       .values({
         nameGlobal: raw.name,
         brand: raw.brand,
-        eanCode: raw.ean,
+        eanCode: ean,
         imageUrl: raw.imageUrl,
         quantityValue: q ? String(q.value) : null,
         quantityUnit: q?.unit ?? null,
@@ -191,7 +224,7 @@ export class PostgresSink implements PriceSink {
       id: row.id,
       nameGlobal: raw.name,
       brand: raw.brand ?? null,
-      eanCode: raw.ean ?? null,
+      eanCode: ean,
       categoryId: null,
       imageUrl: raw.imageUrl ?? null,
       quantityValue: q?.value ?? null,

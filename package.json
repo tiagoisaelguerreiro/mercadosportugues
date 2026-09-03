@@ -23,7 +23,8 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed-db.ts",
     "db:check": "tsx src/db/check-db.ts",
-    "scrape:verify": "tsx src/scrapers/pipeline/verify-scrape.ts"
+    "scrape:verify": "tsx src/scrapers/pipeline/verify-scrape.ts",
+    "enrich:eans": "tsx src/scrapers/pipeline/enrich-eans.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",

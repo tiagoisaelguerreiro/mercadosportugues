@@ -79,6 +79,137 @@ export function extractOpeningTag(html: string, className: string): string | nul
   return html.match(re)?.[0] ?? null;
 }
 
+export interface JsonLdProduct {
+  name?: string;
+  brand?: string;
+  sku?: string;
+  mpn?: string;
+  gtin?: string;
+  image?: string;
+  offerPrice?: number;
+  offerCurrency?: string;
+}
+
+/**
+ * Extrai blocos `<script type="application/ld+json">` e devolve os nos
+ * `@type: Product` (inclui `@graph`). Usado para EAN (`gtin13`/`gtin8`/`gtin`/
+ * `ean`) e preco autoritativo (`offers.price`) nas paginas de produto.
+ */
+export function extractJsonLdProducts(html: string): JsonLdProduct[] {
+  const out: JsonLdProduct[] = [];
+  const re = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) {
+    try {
+      const parsed: unknown = JSON.parse(match[1].trim());
+      for (const node of flattenJsonLd(parsed)) {
+        if (typeof node !== "object" || node === null) continue;
+        const record = node as Record<string, unknown>;
+        const type = record["@type"];
+        const types = Array.isArray(type) ? type : [type];
+        if (!types.some((t) => String(t).toLowerCase() === "product")) continue;
+        out.push({
+          name: asString(record.name),
+          brand: brandName(record.brand),
+          sku: asString(record.sku),
+          mpn: asString(record.mpn),
+          gtin: firstString(
+            record.gtin13,
+            record.gtin8,
+            record.gtin,
+            record.gtin12,
+            record.gtin14,
+            record.ean,
+          ),
+          image: firstImage(record.image),
+          offerPrice: offerPrice(record.offers),
+          offerCurrency: offerCurrency(record.offers),
+        });
+      }
+    } catch {
+      // Bloco JSON-LD invalido — ignora e continua nos restantes.
+    }
+  }
+  return out;
+}
+
+/**
+ * EANs do Continente: vao embutidos no `data-url` do separador de informacao
+ * nutricional (`...Product-ProductNutritionalInfoTab?pid=..&ean=A%7cB&...`),
+ * separados por `|` (varias variantes/tamanhos). Devolve digitos limpos.
+ */
+export function extractContinenteEans(html: string): string[] {
+  const found = new Set<string>();
+  // `ean=` aparece como `?ean=`, `&ean=` ou escapado `&amp;ean=` no HTML;
+  // valores separados por `|` (codificado `%7c`) para variantes/tamanhos.
+  const re = /(?:[?&]|&amp;)ean=([^&"'\s<>]+)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html)) !== null) {
+    const decoded = decodeHtmlEntities(match[1]).replace(/%7[cC]/g, "|");
+    for (const part of decoded.split(/[|;,]+/)) {
+      const digits = part.replace(/\D/g, "");
+      if (digits.length >= 8 && digits.length <= 14) found.add(digits);
+    }
+  }
+  return [...found];
+}
+
+function flattenJsonLd(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value.flatMap(flattenJsonLd);
+  if (typeof value === "object" && value !== null) {
+    const record = value as Record<string, unknown>;
+    const nested = record["@graph"] != null ? flattenJsonLd(record["@graph"]) : [];
+    return [value, ...nested];
+  }
+  return [];
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function firstString(...values: unknown[]): string | undefined {
+  for (const v of values) {
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+  return undefined;
+}
+
+function brandName(brand: unknown): string | undefined {
+  if (typeof brand === "string") return brand || undefined;
+  if (typeof brand === "object" && brand !== null) {
+    return asString((brand as Record<string, unknown>).name);
+  }
+  return undefined;
+}
+
+function firstImage(image: unknown): string | undefined {
+  if (typeof image === "string") return image || undefined;
+  if (Array.isArray(image)) return firstString(...image);
+  return undefined;
+}
+
+function offerPrice(offers: unknown): number | undefined {
+  const list = Array.isArray(offers) ? offers : [offers];
+  for (const offer of list) {
+    if (typeof offer !== "object" || offer === null) continue;
+    const price = (offer as Record<string, unknown>).price;
+    const num = typeof price === "number" ? price : parsePrice(String(price ?? ""));
+    if (num != null) return num;
+  }
+  return undefined;
+}
+
+function offerCurrency(offers: unknown): string | undefined {
+  const list = Array.isArray(offers) ? offers : [offers];
+  for (const offer of list) {
+    if (typeof offer !== "object" || offer === null) continue;
+    const cur = asString((offer as Record<string, unknown>).priceCurrency);
+    if (cur) return cur;
+  }
+  return undefined;
+}
+
 /**
  * Le um preco de microdata SFCC (Continente, Pingo Doce, Auchan).
  *

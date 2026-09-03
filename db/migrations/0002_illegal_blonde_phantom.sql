@@ -1,0 +1,1 @@
+ALTER TABLE "products_market" ADD COLUMN "brand_market" varchar(120);
