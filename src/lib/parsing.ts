@@ -55,9 +55,29 @@ const UNIT_ALIASES: Record<string, QuantityUnit> = {
   unidades: "un",
   doses: "un",
   dose: "un",
+  dos: "un",
   capsulas: "un",
   rolos: "un",
 };
+
+/**
+ * Remove ruido dos nomes das lojas para matching e parse de quantidade:
+ * preco por unidade (`| 0,90 €/L`), peso escorrido, `120 (84)g`.
+ */
+export function cleanOfferName(name: string): string {
+  return name
+    .replace(/&ordm;|&#186;|&deg;/gi, "o")
+    .replace(/&amp;/gi, "&")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\|[^|\n]*€[^|\n]*/gi, " ")
+    .replace(/\(\s*peso escorrido[^)]*\)/gi, " ")
+    .replace(
+      /(\d+(?:[.,]\d+)?)\s*\(\s*\d+(?:[.,]\d+)?\s*\)\s*(kg|g|gr|l|ml|cl)\b/gi,
+      "$1 $2",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 /**
  * Extrai quantidade e unidade do nome de um produto.
@@ -73,7 +93,11 @@ const UNIT_ALIASES: Record<string, QuantityUnit> = {
  * Devolve `null` se nao encontrar quantidade reconhecivel.
  */
 export function parseQuantity(name: string): ParsedQuantity | null {
-  const text = stripAccents(name.toLowerCase()).replace(/,/g, ".");
+  const text = stripAccents(cleanOfferName(name).toLowerCase()).replace(/,/g, ".");
+
+  if (/\b(?:uma\s+)?duzia\b/.test(text) && !/\d+\s*(kg|g|l|ml|cl)\b/.test(text)) {
+    return buildQuantity(12, "un");
+  }
 
   // Padrao multipack: "<n>x<valor><unidade>"  (ex.: 6x1.5l, 4 x 125 g)
   const multipack = text.match(
@@ -86,6 +110,12 @@ export function parseQuantity(name: string): ParsedQuantity | null {
     if (unit && count > 0 && each > 0) {
       return buildQuantity(count * each, unit);
     }
+  }
+
+  const packCount = text.match(/\bpack[\s.-]*(\d+)\b/i);
+  if (packCount) {
+    const count = parseInt(packCount[1], 10);
+    if (count > 1) return buildQuantity(count, "un");
   }
 
   // Padrao simples: "<valor><unidade>"  (ex.: 1kg, 500 g, 1.5 l, 6 un)
@@ -102,6 +132,26 @@ export function parseQuantity(name: string): ParsedQuantity | null {
     }
   }
   return last;
+}
+
+/**
+ * Numero de unidades num pack ("24 x 25 cl", "Pack 24").
+ * Serve para ligar a mesma referencia quando uma loja indica o volume total
+ * e outra so o numero de unidades.
+ */
+export function parsePackCount(name: string): number | null {
+  const text = stripAccents(cleanOfferName(name).toLowerCase()).replace(/,/g, ".");
+  const multipack = text.match(/(\d+)\s*[x×]\s*(\d+(?:\.\d+)?)\s*([a-zç]+)/i);
+  if (multipack) {
+    const count = parseInt(multipack[1], 10);
+    if (count > 1) return count;
+  }
+  const pack = text.match(/\bpack[\s.-]*(\d+)\b/i);
+  if (pack) {
+    const count = parseInt(pack[1], 10);
+    if (count > 1) return count;
+  }
+  return null;
 }
 
 function resolveUnit(token: string): QuantityUnit | null {

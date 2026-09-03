@@ -52,9 +52,25 @@ export interface ProductMarket {
   productUrl: string | null;
   imageUrl: string | null;
   rawEan: string | null;
+  /** Marca tal como veio da loja (nao misturar com o produto global). */
+  brandMarket?: string | null;
   matchStatus: MatchStatus;
   matchConfidence: number | null;
   lastSeenAt: string | null;
+}
+
+export interface ReviewMatch {
+  productMarket: ProductMarket;
+  supermarket: Supermarket;
+  suggestedProduct: ProductGlobal | null;
+}
+
+export interface ReviewGlobalInput {
+  nameGlobal?: string;
+  brand?: string | null;
+  eanCode?: string | null;
+  categoryId?: number | null;
+  imageUrl?: string | null;
 }
 
 export interface PricePoint {
@@ -153,3 +169,89 @@ export interface BasketComparison {
   winner: BasketSupermarketResult | null;
   bestCompleteResult: BasketSupermarketResult | null;
 }
+
+// ── Navegacao por catalogo (filtros + paginacao) ─────────────────────────────
+
+export type BrowseSort = "relevance" | "cheapest" | "savings" | "promo" | "name";
+
+export interface BrowseParams {
+  query?: string;
+  categoryId?: number | null;
+  supermarketSlug?: string | null;
+  onlyPromo?: boolean;
+  sort?: BrowseSort;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface BrowseResult {
+  items: ProductWithOffers[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+// ── Estatisticas da plataforma ───────────────────────────────────────────────
+
+/** Numeros agregados usados na home, em /sobre e em /api/stats. */
+export interface PlatformStats {
+  productCount: number;
+  offerCount: number;
+  promoCount: number;
+  activeSupermarkets: number;
+  categoryCount: number;
+  /** Data (YYYY-MM-DD) da captura de precos mais recente, ou null sem dados. */
+  lastCapturedAt: string | null;
+}
+
+/** Resumo comparativo de um supermercado face aos restantes. */
+export interface SupermarketSummary {
+  supermarket: Supermarket;
+  offerCount: number;
+  promoCount: number;
+  /** Numero de produtos em que pratica o preco mais baixo (empates contam). */
+  cheapestCount: number;
+  /** Percentagem (0..100) das suas ofertas em que e o mais barato. */
+  cheapestShare: number;
+  /**
+   * Indice de preco medio: 100 = media dos supermercados para os mesmos
+   * produtos; abaixo de 100 e mais barato que a media. null sem dados.
+   */
+  priceIndex: number | null;
+}
+
+/** Estatisticas do historico de um produto num periodo. */
+export interface PriceStats {
+  days: number;
+  current: number | null;
+  min: number | null;
+  max: number | null;
+  avg: number | null;
+  /** Variacao do melhor preco entre o inicio e o fim do periodo. */
+  changeAbsolute: number | null;
+  changePercent: number | null;
+}
+
+// ── Observabilidade do scraping ──────────────────────────────────────────────
+
+export type ScrapeRunStatus = "running" | "success" | "failed";
+
+export interface ScrapeRun {
+  id: number;
+  supermarketId: number;
+  supermarketSlug: string;
+  startedAt: string; // ISO datetime
+  finishedAt: string | null;
+  status: ScrapeRunStatus;
+  productsReceived: number;
+  newMarketProducts: number;
+  pricePoints: number;
+  matched: number;
+  review: number;
+  orphan: number;
+  dryRun: boolean;
+  errorMessage: string | null;
+}
+
+export type ScrapeRunInput = Omit<ScrapeRun, "id">;

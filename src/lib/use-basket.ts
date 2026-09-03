@@ -30,9 +30,12 @@ function write(items: BasketItem[]): void {
 /** Hook de carrinho persistido em localStorage e sincronizado entre componentes. */
 export function useBasket() {
   const [items, setItems] = useState<BasketItem[]>([]);
+  // false ate ler o localStorage no cliente: evita mostrar "carrinho vazio" antes da hidratacao.
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     setItems(read());
+    setHydrated(true);
     const sync = () => setItems(read());
     window.addEventListener("mp-basket-change", sync);
     window.addEventListener("storage", sync);
@@ -72,6 +75,22 @@ export function useBasket() {
 
   const clear = useCallback(() => write([]), []);
 
+  /** Substitui o carrinho inteiro (ex.: importar carrinho partilhado). */
+  const replaceAll = useCallback((next: BasketItem[]) => {
+    write(next.filter((i) => i.quantity > 0));
+  }, []);
+
+  /** Junta linhas ao carrinho atual, somando quantidades de produtos repetidos. */
+  const merge = useCallback((incoming: BasketItem[]) => {
+    const current = read();
+    const byId = new Map(current.map((i) => [i.productGlobalId, i.quantity]));
+    for (const i of incoming) {
+      if (i.quantity <= 0) continue;
+      byId.set(i.productGlobalId, (byId.get(i.productGlobalId) ?? 0) + i.quantity);
+    }
+    write([...byId.entries()].map(([productGlobalId, quantity]) => ({ productGlobalId, quantity })));
+  }, []);
+
   const has = useCallback(
     (productGlobalId: number) => items.some((i) => i.productGlobalId === productGlobalId),
     [items],
@@ -79,5 +98,5 @@ export function useBasket() {
 
   const totalCount = items.reduce((sum, i) => sum + i.quantity, 0);
 
-  return { items, add, setQuantity, remove, clear, has, totalCount };
+  return { items, add, setQuantity, remove, clear, replaceAll, merge, has, totalCount, hydrated };
 }

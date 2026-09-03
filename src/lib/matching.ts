@@ -1,15 +1,12 @@
 import type { ParsedQuantity, ProductGlobal, RawProduct } from "@/lib/types";
-import { normalizeText, parseQuantity } from "@/lib/parsing";
+import { cleanOfferName, normalizeText, parsePackCount, parseQuantity } from "@/lib/parsing";
 
-// Stop words PT que nao ajudam a distinguir produtos.
 const STOPWORDS = new Set([
   "de",
   "da",
   "do",
   "das",
   "dos",
-  "com",
-  "sem",
   "e",
   "a",
   "o",
@@ -24,14 +21,218 @@ const STOPWORDS = new Set([
   "emb",
 ]);
 
-/**
- * Reduz um nome de produto a um conjunto de tokens significativos, ordenados.
- * Ordenar evita falsos negativos por ordem de palavras diferente entre lojas.
- */
+const NOISE_TOKENS = new Set([
+  "uht",
+  "kg",
+  "kgs",
+  "gr",
+  "grs",
+  "lt",
+  "lts",
+  "ml",
+  "cl",
+  "un",
+  "und",
+  "unid",
+  "pack",
+  "mega",
+  "int",
+  "tipo",
+  "essencial",
+  "biologico",
+  "bio",
+  "longo",
+  "branqueado",
+  "gluten",
+  "pasteurizado",
+  "especial",
+  "premium",
+  "gourmet",
+  "equilibrio",
+  "equilibrado",
+]);
+
+const TOKEN_SYNONYMS: Record<string, string> = {
+  leche: "leite",
+  yogur: "iogurte",
+  yogurt: "iogurte",
+  azucar: "acucar",
+  acucarado: "acucar",
+  mantequilla: "manteiga",
+  huevos: "ovos",
+  huevo: "ovos",
+  cerveza: "cerveja",
+  atun: "atum",
+  harina: "farinha",
+  pasta: "massa",
+  spaghetti: "esparguete",
+  spaguetti: "esparguete",
+  semidesnatada: "meiogordo",
+  semidesnatado: "meiogordo",
+  desnatada: "magro",
+  desnatado: "magro",
+  botella: "garrafa",
+  garbanzos: "grao",
+  girasol: "girassol",
+  fresca: "fresco",
+  pequena: "pequeno",
+  molido: "moido",
+  grano: "grao",
+  descafeinado: "descafeinado",
+  descafeinada: "descafeinado",
+};
+
+const PRIVATE_BRANDS = [
+  "pingo doce biologico",
+  "pingo doce",
+  "continente equilibrio",
+  "continente selecao",
+  "cozinha continente",
+  "continente",
+  "auchan essencial",
+  "auchan extra",
+  "auchan",
+  "hacendado",
+  "bosque verde",
+  "nossa padaria",
+  "nossa fruta e legumes",
+  "os nossos frescos",
+  "da nossa pastelaria",
+  "polegar",
+  "mylabel",
+  "go active",
+  "aldi",
+  "lidl",
+  "minipreco",
+];
+
+/** Marcas nacionais frequentes, para as retirar do nome da Auchan (brand=null). */
+const NATIONAL_BRANDS = [
+  "nescafe dolce gusto",
+  "oliveira da serra",
+  "terra nossa",
+  "terra nostra",
+  "bom petisco",
+  "bom sucesso",
+  "branca de neve",
+  "coca cola",
+  "coca-cola",
+  "super bock",
+  "delta q",
+  "delta",
+  "mimosa",
+  "cigala",
+  "barilla",
+  "milaneza",
+  "nescafe",
+  "alpro",
+  "compal",
+  "ramirez",
+  "tenorio",
+  "gallo",
+  "fula",
+  "luso",
+  "vitalis",
+  "primor",
+  "vaqueiro",
+  "planta",
+  "becel",
+  "matinal",
+  "matinados",
+  "gresso",
+  "agros",
+  "limiano",
+  "milhafre",
+  "sical",
+  "buondi",
+  "skip",
+  "fairy",
+  "renova",
+  "sagres",
+  "heineken",
+  "amstel",
+  "nestle",
+  "danone",
+  "activia",
+  "oikos",
+  "um bongo",
+  "oriente",
+  "caçarola",
+  "cacarola",
+  "royal",
+  "maizena",
+  "cristall",
+  "cristal",
+  "pedras",
+  "frize",
+  "yoggi",
+  "nestum",
+  "monchique",
+  "riberalves",
+  "aptamil",
+  "actimel",
+  "bimbo",
+  "gullon",
+  "vatel",
+  "saborosa",
+  "fastio",
+  "penacova",
+  "pedras salgadas",
+  "cergal",
+  "steinburg",
+  "nivea",
+  "colgate",
+  "palmolive",
+  "ariel",
+  "persil",
+  "vizir",
+  "calgon",
+  "cif",
+  "ajax",
+  "loreal",
+  "l oreal",
+];
+
+const PRIVATE_BRANDS_SORTED = [...PRIVATE_BRANDS].sort((a, b) => b.length - a.length);
+const NATIONAL_BRANDS_SORTED = [...NATIONAL_BRANDS].sort((a, b) => b.length - a.length);
+
+const VARIETY_GROUPS: string[][] = [
+  ["agulha", "carolino", "basmati", "vaporizado", "arborio", "integral"],
+  ["meiogordo", "magro", "gordo"],
+  ["esparguete", "penne", "fusilli", "espirais", "macarrao", "fusili"],
+  ["natural", "azeite", "oleo"],
+  ["semlactose"],
+  ["classem", "classel", "classeml"],
+  ["comsal", "semsal"],
+  ["intenso", "classico", "ouro", "selecionado", "gold", "creme", "chavena", "superior"],
+  ["moido", "grao", "soluvel"],
+  ["ristretto", "lungo", "espresso"],
+  ["zero", "original", "light", "diet"],
+  ["descafeinado"],
+  ["zero"],
+  ["achocolatado"],
+  [
+    "morango",
+    "banana",
+    "ananas",
+    "coco",
+    "chocolate",
+    "baunilha",
+    "pessego",
+    "limao",
+    "framboesa",
+    "mirtilo",
+    "manga",
+    "tutti",
+    "frutti",
+    "natural",
+  ],
+];
+
 export function tokenize(name: string): string[] {
-  return normalizeText(name)
+  return normalizeText(cleanOfferName(name))
     .split(/\s+/)
-    .map((t) => t.replace(/^\d+(?:[.,]\d+)?/, "")) // remove prefixo numerico: "1kg" -> "kg"
+    .map((t) => t.replace(/^\d+(?:[.,]\d+)?/, ""))
     .filter((t) => t.length > 1 && !STOPWORDS.has(t) && !/^\d+([.,]\d+)?$/.test(t))
     .sort();
 }
@@ -118,35 +319,30 @@ export function jaroWinkler(a: string, b: string): number {
 }
 
 /**
- * Similaridade combinada usada para o matching de nomes:
- * media ponderada de token-set (via Levenshtein sobre chaves canonicas) e
- * Jaro-Winkler sobre o texto normalizado.
+ * Similaridade combinada: sobreposicao de tokens (ordem irrelevante) + Jaro-Winkler.
+ * Marcas proprias e texto extra das lojas ja foram limpos nos tokens de identidade.
  */
 export function nameSimilarity(a: string, b: string): number {
+  const tokensA = identityTokens(a);
+  const tokensB = identityTokens(b);
+  const overlap = tokenOverlap(tokensA, tokensB);
+  const dice = tokenDice(tokensA, tokensB);
   const keyA = canonicalKey(a);
   const keyB = canonicalKey(b);
-  const tokenScore = levenshteinRatio(keyA, keyB);
-  // JW tambem sobre as chaves canonicas para nao penalizar ordem de palavras.
   const jwScore = jaroWinkler(keyA, keyB);
-  return 0.6 * tokenScore + 0.4 * jwScore;
+  return 0.5 * overlap + 0.3 * dice + 0.2 * jwScore;
 }
 
-/**
- * Verifica se duas quantidades sao "o mesmo tamanho".
- * Este teste e um VETO, nao um fator de score: produtos de tamanhos
- * diferentes nunca podem ser o mesmo produto global.
- */
 export function sameSize(
   a: ParsedQuantity | null,
   b: ParsedQuantity | null,
-  tolerance = 0.001,
+  tolerance = 0.02,
 ): boolean {
-  // Se nenhum tem quantidade conhecida, nao bloqueamos (decide o nome).
   if (!a && !b) return true;
-  // Se so um tem quantidade, nao podemos garantir igualdade -> bloqueia.
   if (!a || !b) return false;
   if (a.baseUnit !== b.baseUnit) return false;
-  return Math.abs(a.baseQuantity - b.baseQuantity) <= tolerance;
+  const scale = Math.max(a.baseQuantity, b.baseQuantity, 0.01);
+  return Math.abs(a.baseQuantity - b.baseQuantity) <= Math.max(tolerance, scale * 0.03);
 }
 
 export type MatchOutcome =
@@ -155,37 +351,81 @@ export type MatchOutcome =
   | { status: "orphan"; globalId: null; confidence: 0 };
 
 export interface MatchThresholds {
-  /** >= auto: junta automaticamente. */
   auto: number;
-  /** >= review (e < auto): envia para revisao humana. */
   review: number;
 }
 
 export const DEFAULT_THRESHOLDS: MatchThresholds = {
-  auto: 0.92,
-  review: 0.8,
+  auto: 0.78,
+  review: 0.62,
 };
 
 export interface MatchCandidate extends ProductGlobal {
-  /** Quantidade ja parseada do produto global (cache opcional). */
   parsedQuantity?: ParsedQuantity | null;
 }
 
-/**
- * Estrategia de matching em cascata:
- *   1) EAN/codigo de barras (determinista, confianca 1.0)
- *   2) Similaridade de nome + VETO de tamanho/unidade
- *
- * `candidates` deve ser uma lista ja filtrada (ex.: por trigram no Postgres,
- * ou todos os globais no modo em memoria).
- */
+export interface ListingRef {
+  name: string;
+  brand?: string | null;
+  ean?: string | null;
+  url?: string | null;
+  supermarketId?: number;
+}
+
+export function pairListings(
+  a: ListingRef,
+  b: ListingRef,
+  thresholds: MatchThresholds = DEFAULT_THRESHOLDS,
+): { status: "matched" | "review" | "reject"; score: number; sameBrand: boolean } {
+  if (a.supermarketId != null && b.supermarketId != null && a.supermarketId === b.supermarketId) {
+    return { status: "reject", score: 0, sameBrand: false };
+  }
+  if (a.ean && b.ean && a.ean === b.ean) {
+    return { status: "matched", score: 1, sameBrand: true };
+  }
+
+  const qtyA = parseQuantity(a.name);
+  const qtyB = parseQuantity(b.name);
+  if (!sizesCompatible(a.name, b.name, qtyA, qtyB)) {
+    return { status: "reject", score: 0, sameBrand: false };
+  }
+
+  const brandA = resolveListingBrand(a.brand, a.name, a.url);
+  const brandB = resolveListingBrand(b.brand, b.name, b.url);
+  if (brandsConflict(brandA, brandB)) return { status: "reject", score: 0, sameBrand: false };
+
+  const tokensA = identityTokens(a.name, brandA?.key ?? null);
+  const tokensB = identityTokens(b.name, brandB?.key ?? null);
+  if (varietiesConflict(tokensA, tokensB)) return { status: "reject", score: 0, sameBrand: false };
+
+  const sameBrand = Boolean(brandA && brandB && brandA.key === brandB.key && !brandA.private);
+  const commodity = !brandA && !brandB;
+  const shared = tokensA.filter((t) => tokensB.includes(t)).length;
+  if (!sameBrand && !commodity) return { status: "reject", score: 0, sameBrand: false };
+  if (commodity && shared < 3) return { status: "reject", score: 0, sameBrand: false };
+
+  const labeledA = `${brandA && !brandA.private ? brandA.key : ""} ${a.name}`;
+  const labeledB = `${brandB && !brandB.private ? brandB.key : ""} ${b.name}`;
+  const jaccard = tokenJaccard(identityTokens(labeledA), identityTokens(labeledB));
+  const score = nameSimilarity(labeledA, labeledB);
+
+  if (commodity) {
+    if (score >= 0.85 && jaccard >= 0.7) return { status: "matched", score, sameBrand: false };
+    return { status: "reject", score, sameBrand: false };
+  }
+
+  const autoCut = Math.min(thresholds.auto, 0.68);
+  if (score >= autoCut && jaccard >= 0.5) return { status: "matched", score, sameBrand };
+  if (score >= thresholds.review && jaccard >= 0.35) return { status: "review", score, sameBrand };
+  return { status: "reject", score, sameBrand };
+}
+
 export function matchProduct(
-  raw: Pick<RawProduct, "name" | "ean">,
+  raw: Pick<RawProduct, "name" | "ean"> & { brand?: string | null; productUrl?: string | null },
   candidates: MatchCandidate[],
   findByEan?: (ean: string) => ProductGlobal | undefined,
   thresholds: MatchThresholds = DEFAULT_THRESHOLDS,
 ): MatchOutcome {
-  // 1) EAN é rei.
   if (raw.ean) {
     const byEan = findByEan
       ? findByEan(raw.ean)
@@ -195,41 +435,175 @@ export function matchProduct(
     }
   }
 
-  // 2) Fuzzy com veto de tamanho.
-  const rawQty = parseQuantity(raw.name);
-  let best: { id: number; score: number } | null = null;
+  let best: { id: number; score: number; status: "matched" | "review" } | null = null;
+  const left: ListingRef = { name: raw.name, brand: raw.brand, ean: raw.ean, url: raw.productUrl };
 
   for (const candidate of candidates) {
-    const candQty =
-      candidate.parsedQuantity !== undefined
-        ? candidate.parsedQuantity
-        : quantityFromGlobal(candidate);
-
-    if (!sameSize(rawQty, candQty)) continue; // VETO
-
-    const score = nameSimilarity(raw.name, `${candidate.brand ?? ""} ${candidate.nameGlobal}`);
-    if (!best || score > best.score) {
-      best = { id: candidate.id, score };
+    const decision = pairListings(
+      left,
+      { name: candidate.nameGlobal, brand: candidate.brand, ean: candidate.eanCode },
+      thresholds,
+    );
+    if (decision.status === "reject") continue;
+    if (!best || decision.score > best.score) {
+      best = { id: candidate.id, score: decision.score, status: decision.status };
     }
   }
 
-  if (best && best.score >= thresholds.auto) {
-    return { status: "matched", globalId: best.id, confidence: best.score };
-  }
-  if (best && best.score >= thresholds.review) {
-    return { status: "review", globalId: best.id, confidence: best.score };
-  }
-  return { status: "orphan", globalId: null, confidence: 0 };
+  if (!best) return { status: "orphan", globalId: null, confidence: 0 };
+  return { status: best.status, globalId: best.id, confidence: best.score };
 }
 
-function quantityFromGlobal(g: ProductGlobal): ParsedQuantity | null {
-  if (g.quantityValue != null && g.quantityUnit != null && g.baseUnit != null && g.baseQuantity != null) {
-    return {
-      value: g.quantityValue,
-      unit: g.quantityUnit,
-      baseUnit: g.baseUnit,
-      baseQuantity: g.baseQuantity,
-    };
+interface ResolvedBrand {
+  key: string;
+  private: boolean;
+}
+
+function foldForTokens(name: string): string {
+  let text = normalizeText(cleanOfferName(name));
+  text = text.replace(/aceite(?:\s+de)?\s+oliva/g, "azeite");
+  text = text.replace(/aceite(?:\s+de)?\s+girasol/g, "oleo girassol");
+  text = text.replace(/\baceite\b/g, "oleo");
+  text = text.replace(/meio\s+gordo/g, "meiogordo");
+  text = text.replace(/sem\s+lactose|0\s*lactose/g, "semlactose");
+  text = text.replace(/achocolatad[oa]|\bcom chocolate\b/g, "achocolatado");
+  text = text.replace(/sem\s+gas/g, "semgas");
+  text = text.replace(/com\s+gas/g, "comgas");
+  text = text.replace(/com\s+sal/g, "comsal");
+  text = text.replace(/sem\s+sal/g, "semsal");
+  text = text.replace(/classe\s*m\s*[\/e]\s*l\b/g, "classeml");
+  text = text.replace(/classe\s*m\s+l\b/g, "classeml");
+  text = text.replace(/classe\s*ml\b/g, "classeml");
+  text = text.replace(/classe\s*m\b/g, "classem");
+  text = text.replace(/classe\s*l\b/g, "classel");
+  return text;
+}
+
+export function identityTokens(name: string, _brandKey?: string | null): string[] {
+  const tokens = foldForTokens(name)
+    .split(/\s+/)
+    .map((t) => TOKEN_SYNONYMS[t] ?? t)
+    .map((t) => t.replace(/^\d+(?:[.,]\d+)?/, ""))
+    .filter((t) => t.length > 1 && !STOPWORDS.has(t) && !NOISE_TOKENS.has(t) && !/^\d+([.,]\d+)?$/.test(t));
+  return [...new Set(tokens)].sort();
+}
+
+function tokenOverlap(a: string[], b: string[]): number {
+  if (!a.length || !b.length) return 0;
+  const setB = new Set(b);
+  const inter = a.filter((t) => setB.has(t)).length;
+  return inter / Math.min(a.length, b.length);
+}
+
+function tokenDice(a: string[], b: string[]): number {
+  if (!a.length && !b.length) return 1;
+  if (!a.length || !b.length) return 0;
+  const setB = new Set(b);
+  const inter = a.filter((t) => setB.has(t)).length;
+  return (2 * inter) / (a.length + b.length);
+}
+
+function tokenJaccard(a: string[], b: string[]): number {
+  if (!a.length && !b.length) return 1;
+  if (!a.length || !b.length) return 0;
+  const setB = new Set(b);
+  const inter = a.filter((t) => setB.has(t)).length;
+  return inter / (a.length + b.length - inter);
+}
+
+function sizesCompatible(
+  nameA: string,
+  nameB: string,
+  qtyA: ParsedQuantity | null,
+  qtyB: ParsedQuantity | null,
+): boolean {
+  if (sameSize(qtyA, qtyB)) return true;
+  const packA = parsePackCount(nameA);
+  const packB = parsePackCount(nameB);
+  return Boolean(packA && packB && packA === packB);
+}
+
+function lookupBrandKey(normalized: string): ResolvedBrand | null {
+  const hay = ` ${normalized} `;
+  for (const brand of NATIONAL_BRANDS_SORTED) {
+    if (hay.includes(` ${brand} `) || normalized === brand) {
+      return { key: brand, private: false };
+    }
   }
-  return parseQuantity(g.nameGlobal);
+  for (const brand of PRIVATE_BRANDS_SORTED) {
+    if (hay.includes(` ${brand} `) || normalized === brand) {
+      return { key: brand, private: true };
+    }
+  }
+  return null;
+}
+
+export function resolveBrand(brand: string | null | undefined, name: string): ResolvedBrand | null {
+  const fromField = brand?.trim() ? lookupBrandKey(normalizeText(brand)) : null;
+  if (fromField) return fromField;
+  if (brand?.trim()) {
+    const key = normalizeText(brand);
+    const isPrivate = PRIVATE_BRANDS_SORTED.some((p) => key === p || key.startsWith(`${p} `));
+    return { key, private: isPrivate };
+  }
+  return lookupBrandKey(normalizeText(cleanOfferName(name)));
+}
+
+export function resolveListingBrand(
+  brand?: string | null,
+  name?: string,
+  url?: string | null,
+): ResolvedBrand | null {
+  const fromField = brand?.trim() ? resolveBrand(brand, "") : null;
+  const fromName = name ? resolveBrand(null, name) : null;
+  const fromUrl = url ? resolveBrand(null, urlToWords(url)) : null;
+  const options = [fromName, fromUrl, fromField].filter((b): b is ResolvedBrand => Boolean(b));
+  return options.find((b) => !b.private) ?? options[0] ?? null;
+}
+
+function urlToWords(url: string): string {
+  let pathname = url.split(/[?#]/)[0] ?? "";
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    pathname = pathname.replace(/^https?:\/\/[^/]+/i, "");
+  }
+  return safeDecode(pathname)
+    .replace(/\.html?$/i, "")
+    .replace(/[-_/]+/g, " ");
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function brandsConflict(a: ResolvedBrand | null, b: ResolvedBrand | null): boolean {
+  if (!a && !b) return false;
+  if (!a || !b) return true;
+  return a.key !== b.key;
+}
+
+function varietiesConflict(a: string[], b: string[]): boolean {
+  for (const group of VARIETY_GROUPS) {
+    if (group.includes("azeite") || group.includes("oleo")) {
+      const tuna = a.includes("atum") || b.includes("atum");
+      if (!tuna) continue;
+    }
+    if (group.length === 1) {
+      const token = group[0];
+      if (a.includes(token) !== b.includes(token)) return true;
+      continue;
+    }
+    const inA = group.filter((t) => a.includes(t));
+    const inB = group.filter((t) => b.includes(t));
+    if (inA.length && inB.length) {
+      const same = inA.length === inB.length && inA.every((t) => inB.includes(t));
+      if (!same) return true;
+    }
+  }
+  return false;
 }

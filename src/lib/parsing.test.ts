@@ -61,10 +61,33 @@ describe("parseQuantity", () => {
 
   it("conta unidades", () => {
     expect(parseQuantity("Ovos Classe M 6 un")).toMatchObject({ baseUnit: "un", baseQuantity: 6 });
+    expect(parseQuantity("Cerveza Clásica Steinburg Pack-12")).toMatchObject({
+      baseUnit: "un",
+      baseQuantity: 12,
+    });
+    expect(parseQuantity("Detergente Skip 76 Dos")).toMatchObject({
+      baseUnit: "un",
+      baseQuantity: 76,
+    });
   });
 
   it("devolve null sem quantidade reconhecivel", () => {
     expect(parseQuantity("Produto sem medida")).toBeNull();
+  });
+
+  it("ignora preco por kg/L colado ao nome e peso escorrido", () => {
+    expect(parseQuantity("Leite UHT Meio Gordo 1 L | 0,9 €/L")).toMatchObject({
+      baseUnit: "L",
+      baseQuantity: 1,
+    });
+    expect(parseQuantity("Atum Posta em Óleo 120 gr (peso escorrido 78 gr)")).toMatchObject({
+      baseUnit: "kg",
+      baseQuantity: 0.12,
+    });
+    expect(parseQuantity("atum posta auchan ao natural 120 (84)g")).toMatchObject({
+      baseUnit: "kg",
+      baseQuantity: 0.12,
+    });
   });
 });
 

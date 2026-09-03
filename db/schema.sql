@@ -143,6 +143,30 @@ CREATE INDEX IF NOT EXISTS idx_latest_global ON latest_prices (product_global_id
 --   REFRESH MATERIALIZED VIEW CONCURRENTLY latest_prices;
 
 -- ─────────────────────────────────────────────────────────────────────────────
+-- Execucoes do pipeline de scraping (observabilidade / painel admin)
+-- Uma linha por (execucao, supermercado). Permite responder "quando foi a
+-- ultima recolha?", "quantos produtos entraram em revisao?" e detetar falhas.
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS scrape_runs (
+    id                  BIGSERIAL PRIMARY KEY,
+    supermarket_id      SMALLINT NOT NULL REFERENCES supermarkets(id),
+    started_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    finished_at         TIMESTAMPTZ,
+    status              VARCHAR(16) NOT NULL DEFAULT 'running', -- running|success|failed
+    products_received   INTEGER NOT NULL DEFAULT 0,
+    new_market_products INTEGER NOT NULL DEFAULT 0,
+    price_points        INTEGER NOT NULL DEFAULT 0,
+    matched_count       INTEGER NOT NULL DEFAULT 0,
+    review_count        INTEGER NOT NULL DEFAULT 0,
+    orphan_count        INTEGER NOT NULL DEFAULT 0,
+    dry_run             BOOLEAN NOT NULL DEFAULT FALSE,
+    error_message       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_scrape_runs_started ON scrape_runs (started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_scrape_runs_market  ON scrape_runs (supermarket_id, started_at DESC);
+
+-- ─────────────────────────────────────────────────────────────────────────────
 -- Funcao auxiliar: cria a particao mensal do historico se nao existir.
 -- Chamada pelo orquestrador antes de inserir precos.
 -- ─────────────────────────────────────────────────────────────────────────────

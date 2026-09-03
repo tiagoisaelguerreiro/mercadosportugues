@@ -1,11 +1,19 @@
 import type {
   BasketComparison,
   BasketLine,
+  BrowseParams,
+  BrowseResult,
   Category,
   HistoryPoint,
+  PlatformStats,
   PriceDrop,
   ProductWithOffers,
+  ProductMarket,
+  ReviewGlobalInput,
+  ReviewMatch,
+  ScrapeRun,
   Supermarket,
+  SupermarketSummary,
 } from "@/lib/types";
 
 export interface HistoryResult {
@@ -26,9 +34,22 @@ export interface Repository {
   getCategories(): Promise<Category[]>;
   getProduct(globalId: number): Promise<ProductWithOffers | null>;
   search(query: string, limit?: number): Promise<ProductWithOffers[]>;
+  /** Catalogo com filtros (categoria, supermercado, promocao), ordenacao e paginacao. */
+  browse(params: BrowseParams): Promise<BrowseResult>;
   getHistory(globalId: number, days?: number): Promise<HistoryResult>;
   biggestDrops(limit?: number): Promise<PriceDrop[]>;
   compareBasket(lines: BasketLine[]): Promise<BasketComparison>;
+  getStats(): Promise<PlatformStats>;
+  /** Ranking de supermercados (ofertas, promocoes, vezes mais barato, indice de preco). */
+  getSupermarketSummaries(): Promise<SupermarketSummary[]>;
+  listScrapeRuns(limit?: number): Promise<ScrapeRun[]>;
+  listReviewMatches(limit?: number): Promise<ReviewMatch[]>;
+  approveReviewMatch(productMarketId: number, productGlobalId?: number): Promise<ProductMarket | null>;
+  rejectReviewMatch(productMarketId: number): Promise<ProductMarket | null>;
+  createGlobalFromReview(
+    productMarketId: number,
+    input?: ReviewGlobalInput,
+  ): Promise<ProductMarket | null>;
 }
 
 /**
