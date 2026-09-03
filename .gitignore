@@ -37,3 +37,6 @@ data/snapshots/*.json
 # editor
 .vscode
 .idea
+
+# segredos locais de deploy (nunca commitar)
+.env.deploy
