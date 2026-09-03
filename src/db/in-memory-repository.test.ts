@@ -69,6 +69,25 @@ describe("InMemoryRepository.browse", () => {
   });
 });
 
+describe("InMemoryRepository.listProductIds", () => {
+  it("devolve IDs ordenados e respeita o limite", async () => {
+    const ids = await repo.listProductIds(10);
+    expect(ids).toHaveLength(10);
+    expect(ids).toEqual([...ids].sort((a, b) => a - b));
+  });
+
+  it("so inclui produtos com oferta e e rapido", async () => {
+    const start = Date.now();
+    const ids = await repo.listProductIds(20_000);
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(ids.length).toBeGreaterThan(0);
+    // todos os IDs existem como produto global
+    for (const id of ids.slice(0, 50)) {
+      expect(await repo.getProduct(id)).not.toBeNull();
+    }
+  });
+});
+
 describe("InMemoryRepository.getStats", () => {
   it("agrega contagens e a data da ultima captura", async () => {
     const stats = await repo.getStats();

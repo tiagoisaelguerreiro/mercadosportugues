@@ -1,7 +1,6 @@
 import type { MetadataRoute } from "next";
 import { getRepository } from "@/db/repository";
 import { getActiveSupermarkets, getCachedCategories, getCachedStats, siteUrl } from "@/lib/data";
-import { BROWSE_MAX_PAGE_SIZE } from "@/db/query-logic";
 
 export const dynamic = "force-dynamic";
 
@@ -40,24 +39,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     })),
   ];
 
-  // Produtos: pagina o catalogo completo para nao carregar tudo em memoria de uma vez.
+  // Produtos: lista leve de IDs (sem compor ofertas) numa unica query.
   try {
-    const repo = getRepository();
-    let page = 1;
-    let collected = 0;
-    for (;;) {
-      const result = await repo.browse({ sort: "name", page, pageSize: BROWSE_MAX_PAGE_SIZE });
-      for (const item of result.items) {
-        entries.push({
-          url: `${base}/produto/${item.product.id}`,
-          lastModified,
-          changeFrequency: "daily",
-          priority: 0.6,
-        });
-      }
-      collected += result.items.length;
-      if (page >= result.totalPages || result.items.length === 0 || collected >= MAX_PRODUCTS) break;
-      page += 1;
+    const ids = await getRepository().listProductIds(MAX_PRODUCTS);
+    for (const id of ids) {
+      entries.push({
+        url: `${base}/produto/${id}`,
+        lastModified,
+        changeFrequency: "daily",
+        priority: 0.6,
+      });
     }
   } catch {
     // Sem base de dados disponivel: devolve apenas as paginas estaticas.

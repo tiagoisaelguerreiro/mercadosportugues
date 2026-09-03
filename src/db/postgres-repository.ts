@@ -227,6 +227,19 @@ export class PostgresRepository implements Repository {
     return { items, total, page: p.page, pageSize: p.pageSize, totalPages };
   }
 
+  async listProductIds(limit = 20_000): Promise<number[]> {
+    const rows = extractRows(
+      await this.db.execute<{ id: number }>(sql`
+        SELECT DISTINCT pm.product_global_id AS id
+        FROM products_market pm
+        WHERE pm.product_global_id IS NOT NULL
+        ORDER BY id ASC
+        LIMIT ${Math.max(1, Math.floor(limit))}
+      `),
+    );
+    return rows.map((r) => Number(r.id));
+  }
+
   async getStats(): Promise<PlatformStats> {
     const [row] = extractRows(
       await this.db.execute<{

@@ -36,6 +36,11 @@ export interface Repository {
   search(query: string, limit?: number): Promise<ProductWithOffers[]>;
   /** Catalogo com filtros (categoria, supermercado, promocao), ordenacao e paginacao. */
   browse(params: BrowseParams): Promise<BrowseResult>;
+  /**
+   * IDs de produtos com pelo menos uma oferta, por ordem numerica.
+   * Leve (sem compor ofertas): para o sitemap, que nao precisa de precos.
+   */
+  listProductIds(limit?: number): Promise<number[]>;
   getHistory(globalId: number, days?: number): Promise<HistoryResult>;
   biggestDrops(limit?: number): Promise<PriceDrop[]>;
   compareBasket(lines: BasketLine[]): Promise<BasketComparison>;

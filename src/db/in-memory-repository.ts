@@ -173,6 +173,17 @@ export class InMemoryRepository implements Repository {
     return browseInMemory(candidates, p, (item) => scores.get(item.product.id) ?? 0);
   }
 
+  async listProductIds(limit = 20_000): Promise<number[]> {
+    const withOffers = new Set<number>();
+    for (const m of this.marketById.values()) {
+      if (m.productGlobalId != null) withOffers.add(m.productGlobalId);
+    }
+    return [...withOffers]
+      .filter((id) => this.globalById.has(id))
+      .sort((a, b) => a - b)
+      .slice(0, Math.max(1, limit));
+  }
+
   async getStats(): Promise<PlatformStats> {
     let offerCount = 0;
     let promoCount = 0;
